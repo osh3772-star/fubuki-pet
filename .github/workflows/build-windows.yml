@@ -1,0 +1,79 @@
+name: Build Fubuki Windows portable
+
+# Manual only. Saving this workflow does not start a build.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fubuki-windows-portable
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out approved source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          architecture: x64
+
+      - name: Install build requirements in a project environment
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\.venv\Scripts\python.exe -m pip install --no-cache-dir -r requirements-build.txt
+          exit $LASTEXITCODE
+
+      - name: Build Windows EXE and portable archive
+        run: |
+          & .\.venv\Scripts\python.exe -m compileall -q launcher.py windows_pet tools/build_program.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\.venv\Scripts\python.exe tools/build_program.py
+          exit $LASTEXITCODE
+
+      - name: Check packaged entry point without opening a desktop window
+        env:
+          FUBUKI_DATA_DIR: ${{ runner.temp }}\fubuki-build-check
+        run: |
+          $bundle = (Get-Content dist/latest-build.txt -Raw).Trim()
+          $exe = Join-Path $bundle 'FubukiPet.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw 'FubukiPet.exe was not created.' }
+          $process = Start-Process -FilePath $exe -ArgumentList '--help' -PassThru
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'Packaged help invocation timed out.'
+          }
+          if ($process.ExitCode -ne 0) { throw "Packaged entry point failed with exit code $($process.ExitCode)." }
+          New-Item -ItemType Directory -Path delivery -Force | Out-Null
+          $zip = Join-Path (Split-Path $bundle -Parent) 'FubukiPet_Windows_Portable.zip'
+          if ((Get-Item -LiteralPath $zip).Length -gt 400MB) { throw 'Portable archive exceeds the conservative included-storage cap; upload skipped.' }
+          Copy-Item -LiteralPath $zip -Destination delivery/FubukiPet_Windows_Portable.zip
+          $digest = (Get-FileHash delivery/FubukiPet_Windows_Portable.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  FubukiPet_Windows_Portable.zip" | Set-Content delivery/SHA256SUMS.txt
+          "Repository: $env:GITHUB_REPOSITORY`nCommit: $env:GITHUB_SHA`nManual and visual acceptance: user pending" | Set-Content delivery/BUILD_ORIGIN.txt
+
+      - name: Save portable build for download
+        uses: actions/upload-artifact@v7
+        with:
+          name: FubukiPet-Windows-x64-${{ github.run_id }}
+          path: delivery/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
