@@ -1,0 +1,1159 @@
+{
+  "release_ready": false,
+  "candidate_only": true,
+  "placeholder": "assets/shared_9state_candidate/idle/00.png",
+  "preview_options": [
+    {
+      "value": "engine",
+      "label": "상호작용 엔진"
+    },
+    {
+      "value": "idle",
+      "label": "현재 기본 idle"
+    },
+    {
+      "value": "waving",
+      "label": "공통 9상태 후보 · waving"
+    },
+    {
+      "value": "running-right",
+      "label": "공통 9상태 후보 · running-right"
+    },
+    {
+      "value": "running-left",
+      "label": "공통 9상태 후보 · running-left"
+    },
+    {
+      "value": "jumping",
+      "label": "공통 9상태 후보 · jumping"
+    },
+    {
+      "value": "failed",
+      "label": "공통 9상태 후보 · failed"
+    },
+    {
+      "value": "waiting",
+      "label": "공통 9상태 후보 · waiting"
+    },
+    {
+      "value": "running",
+      "label": "공통 9상태 후보 · running (AI state)"
+    },
+    {
+      "value": "review",
+      "label": "공통 9상태 후보 · review"
+    },
+    {
+      "value": "grab_start",
+      "label": "확장 Pet · grab_start"
+    },
+    {
+      "value": "grabbed_idle",
+      "label": "확장 Pet · grabbed_idle"
+    },
+    {
+      "value": "drag_left",
+      "label": "확장 Pet · drag_left"
+    },
+    {
+      "value": "drag_right",
+      "label": "확장 Pet · drag_right"
+    },
+    {
+      "value": "drag_up",
+      "label": "확장 Pet · drag_up"
+    },
+    {
+      "value": "drag_down",
+      "label": "확장 Pet · drag_down"
+    },
+    {
+      "value": "release",
+      "label": "확장 Pet · release"
+    },
+    {
+      "value": "fall",
+      "label": "확장 Pet · fall"
+    },
+    {
+      "value": "landing",
+      "label": "확장 Pet · landing"
+    },
+    {
+      "value": "recover",
+      "label": "확장 Pet · recover"
+    },
+    {
+      "value": "legacy_idle_candidate",
+      "label": "기존 추출 · idle"
+    },
+    {
+      "value": "legacy_walk_candidate",
+      "label": "기존 추출 · walk"
+    },
+    {
+      "value": "legacy_greeting_candidate",
+      "label": "기존 추출 · greeting"
+    }
+  ],
+  "clips": {
+    "idle": {
+      "frames": [
+        "assets/shared_9state_candidate/idle/00.png",
+        "assets/shared_9state_candidate/idle/01.png",
+        "assets/shared_9state_candidate/idle/02.png",
+        "assets/shared_9state_candidate/idle/03.png",
+        "assets/shared_9state_candidate/idle/04.png",
+        "assets/shared_9state_candidate/idle/05.png"
+      ],
+      "durations_ms": [
+        280,
+        110,
+        110,
+        140,
+        140,
+        320
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "idle"
+    },
+    "running-right": {
+      "frames": [
+        "assets/shared_9state_candidate/running-right/00.png",
+        "assets/shared_9state_candidate/running-right/01.png",
+        "assets/shared_9state_candidate/running-right/02.png",
+        "assets/shared_9state_candidate/running-right/03.png",
+        "assets/shared_9state_candidate/running-right/04.png",
+        "assets/shared_9state_candidate/running-right/05.png",
+        "assets/shared_9state_candidate/running-right/06.png",
+        "assets/shared_9state_candidate/running-right/07.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "label": "shared candidate running-right",
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true
+    },
+    "running-left": {
+      "frames": [
+        "assets/shared_9state_candidate/running-left/00.png",
+        "assets/shared_9state_candidate/running-left/01.png",
+        "assets/shared_9state_candidate/running-left/02.png",
+        "assets/shared_9state_candidate/running-left/03.png",
+        "assets/shared_9state_candidate/running-left/04.png",
+        "assets/shared_9state_candidate/running-left/05.png",
+        "assets/shared_9state_candidate/running-left/06.png",
+        "assets/shared_9state_candidate/running-left/07.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "label": "shared candidate running-left",
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true
+    },
+    "waving": {
+      "frames": [
+        "assets/shared_9state_candidate/waving/00.png",
+        "assets/shared_9state_candidate/waving/01.png",
+        "assets/shared_9state_candidate/waving/02.png",
+        "assets/shared_9state_candidate/waving/03.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        280
+      ],
+      "loop": false,
+      "label": "shared candidate waving",
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true
+    },
+    "jumping": {
+      "frames": [
+        "assets/shared_9state_candidate/jumping/00.png",
+        "assets/shared_9state_candidate/jumping/01.png",
+        "assets/shared_9state_candidate/jumping/02.png",
+        "assets/shared_9state_candidate/jumping/03.png",
+        "assets/shared_9state_candidate/jumping/04.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        140,
+        280
+      ],
+      "loop": false,
+      "label": "shared candidate jumping",
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true
+    },
+    "failed": {
+      "frames": [
+        "assets/shared_9state_candidate/failed/00.png",
+        "assets/shared_9state_candidate/failed/01.png",
+        "assets/shared_9state_candidate/failed/02.png",
+        "assets/shared_9state_candidate/failed/03.png",
+        "assets/shared_9state_candidate/failed/04.png",
+        "assets/shared_9state_candidate/failed/05.png",
+        "assets/shared_9state_candidate/failed/06.png",
+        "assets/shared_9state_candidate/failed/07.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        240
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "failed"
+    },
+    "waiting": {
+      "frames": [
+        "assets/shared_9state_candidate/waiting/00.png",
+        "assets/shared_9state_candidate/waiting/01.png",
+        "assets/shared_9state_candidate/waiting/02.png",
+        "assets/shared_9state_candidate/waiting/03.png",
+        "assets/shared_9state_candidate/waiting/04.png",
+        "assets/shared_9state_candidate/waiting/05.png"
+      ],
+      "durations_ms": [
+        150,
+        150,
+        150,
+        150,
+        150,
+        260
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "waiting"
+    },
+    "running": {
+      "frames": [
+        "assets/shared_9state_candidate/running/00.png",
+        "assets/shared_9state_candidate/running/01.png",
+        "assets/shared_9state_candidate/running/02.png",
+        "assets/shared_9state_candidate/running/03.png",
+        "assets/shared_9state_candidate/running/04.png",
+        "assets/shared_9state_candidate/running/05.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "label": "shared candidate running",
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true
+    },
+    "review": {
+      "frames": [
+        "assets/shared_9state_candidate/review/00.png",
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png",
+        "assets/shared_9state_candidate/review/03.png",
+        "assets/shared_9state_candidate/review/04.png",
+        "assets/shared_9state_candidate/review/05.png"
+      ],
+      "durations_ms": [
+        150,
+        150,
+        150,
+        150,
+        150,
+        280
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "review"
+    },
+    "grab_start": {
+      "frames": [
+        "assets/generated_interaction/grab_start/000.png",
+        "assets/generated_interaction/grab_start/001.png",
+        "assets/generated_interaction/grab_start/002.png",
+        "assets/generated_interaction/grab_start/003.png"
+      ],
+      "durations_ms": [
+        70,
+        70,
+        80,
+        110
+      ],
+      "loop": false,
+      "label": "generated grab_start",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "grabbed_idle": {
+      "frames": [
+        "assets/generated_interaction/grabbed_idle/000.png",
+        "assets/generated_interaction/grabbed_idle/001.png",
+        "assets/generated_interaction/grabbed_idle/002.png",
+        "assets/generated_interaction/grabbed_idle/003.png",
+        "assets/generated_interaction/grabbed_idle/004.png",
+        "assets/generated_interaction/grabbed_idle/005.png"
+      ],
+      "durations_ms": [
+        150,
+        150,
+        150,
+        150,
+        150,
+        150
+      ],
+      "loop": true,
+      "label": "generated grabbed_idle",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "drag_left": {
+      "frames": [
+        "assets/generated_interaction/drag_left/000.png",
+        "assets/generated_interaction/drag_left/001.png",
+        "assets/generated_interaction/drag_left/002.png",
+        "assets/generated_interaction/drag_left/003.png"
+      ],
+      "durations_ms": [
+        90,
+        90,
+        90,
+        90
+      ],
+      "loop": false,
+      "label": "generated drag_left",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "drag_right": {
+      "frames": [
+        "assets/generated_interaction/drag_right/000.png",
+        "assets/generated_interaction/drag_right/001.png",
+        "assets/generated_interaction/drag_right/002.png",
+        "assets/generated_interaction/drag_right/003.png"
+      ],
+      "durations_ms": [
+        90,
+        90,
+        90,
+        90
+      ],
+      "loop": false,
+      "label": "generated drag_right",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "drag_up": {
+      "frames": [
+        "assets/generated_interaction/drag_up/000.png",
+        "assets/generated_interaction/drag_up/001.png",
+        "assets/generated_interaction/drag_up/002.png",
+        "assets/generated_interaction/drag_up/003.png"
+      ],
+      "durations_ms": [
+        90,
+        90,
+        90,
+        90
+      ],
+      "loop": false,
+      "label": "generated drag_up",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "drag_down": {
+      "frames": [
+        "assets/generated_interaction/drag_down/000.png",
+        "assets/generated_interaction/drag_down/001.png",
+        "assets/generated_interaction/drag_down/002.png",
+        "assets/generated_interaction/drag_down/003.png"
+      ],
+      "durations_ms": [
+        90,
+        90,
+        90,
+        90
+      ],
+      "loop": false,
+      "label": "generated drag_down",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "release": {
+      "frames": [
+        "assets/generated_interaction/release/000.png",
+        "assets/generated_interaction/release/001.png",
+        "assets/generated_interaction/release/002.png",
+        "assets/generated_interaction/release/003.png"
+      ],
+      "durations_ms": [
+        60,
+        60,
+        70,
+        80
+      ],
+      "loop": false,
+      "label": "generated release",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "fall": {
+      "frames": [
+        "assets/generated_interaction/fall/000.png",
+        "assets/generated_interaction/fall/001.png",
+        "assets/generated_interaction/fall/002.png",
+        "assets/generated_interaction/fall/003.png",
+        "assets/generated_interaction/fall/004.png"
+      ],
+      "durations_ms": [
+        70,
+        70,
+        80,
+        80,
+        90
+      ],
+      "loop": false,
+      "label": "generated fall",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "landing": {
+      "frames": [
+        "assets/generated_interaction/landing/000.png",
+        "assets/generated_interaction/landing/001.png",
+        "assets/generated_interaction/landing/002.png",
+        "assets/generated_interaction/landing/003.png"
+      ],
+      "durations_ms": [
+        80,
+        80,
+        90,
+        100
+      ],
+      "loop": false,
+      "label": "generated landing",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "recover": {
+      "frames": [
+        "assets/generated_interaction/recover/000.png",
+        "assets/generated_interaction/recover/001.png",
+        "assets/generated_interaction/recover/002.png",
+        "assets/generated_interaction/recover/003.png",
+        "assets/generated_interaction/recover/004.png"
+      ],
+      "durations_ms": [
+        80,
+        80,
+        90,
+        90,
+        120
+      ],
+      "loop": false,
+      "label": "generated recover",
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true
+    },
+    "legacy_idle_candidate": {
+      "frames": [
+        "assets/candidate/idle_candidate/000.png",
+        "assets/candidate/idle_candidate/001.png",
+        "assets/candidate/idle_candidate/002.png",
+        "assets/candidate/idle_candidate/003.png",
+        "assets/candidate/idle_candidate/004.png",
+        "assets/candidate/idle_candidate/005.png",
+        "assets/candidate/idle_candidate/006.png",
+        "assets/candidate/idle_candidate/007.png",
+        "assets/candidate/idle_candidate/008.png",
+        "assets/candidate/idle_candidate/009.png"
+      ],
+      "durations_ms": [
+        300,
+        140,
+        140,
+        110,
+        110,
+        180,
+        160,
+        160,
+        180,
+        300
+      ],
+      "loop": true,
+      "status": "legacy_extracted_existing",
+      "not_for_release": true,
+      "label": "legacy idle candidate"
+    },
+    "legacy_walk_candidate": {
+      "frames": [
+        "assets/candidate/walk_candidate/000.png",
+        "assets/candidate/walk_candidate/001.png",
+        "assets/candidate/walk_candidate/002.png",
+        "assets/candidate/walk_candidate/003.png",
+        "assets/candidate/walk_candidate/004.png",
+        "assets/candidate/walk_candidate/005.png",
+        "assets/candidate/walk_candidate/006.png",
+        "assets/candidate/walk_candidate/007.png",
+        "assets/candidate/walk_candidate/008.png",
+        "assets/candidate/walk_candidate/009.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120
+      ],
+      "loop": true,
+      "status": "legacy_extracted_existing",
+      "not_for_release": true,
+      "label": "legacy walk candidate"
+    },
+    "legacy_greeting_candidate": {
+      "frames": [
+        "assets/candidate/greeting_candidate/000.png",
+        "assets/candidate/greeting_candidate/001.png",
+        "assets/candidate/greeting_candidate/002.png",
+        "assets/candidate/greeting_candidate/003.png",
+        "assets/candidate/greeting_candidate/004.png",
+        "assets/candidate/greeting_candidate/005.png",
+        "assets/candidate/greeting_candidate/006.png",
+        "assets/candidate/greeting_candidate/007.png",
+        "assets/candidate/greeting_candidate/008.png",
+        "assets/candidate/greeting_candidate/009.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140,
+        140
+      ],
+      "loop": false,
+      "status": "legacy_extracted_existing",
+      "not_for_release": true,
+      "label": "legacy greeting candidate"
+    },
+    "wave": {
+      "frames": [
+        "assets/shared_9state_candidate/waving/00.png",
+        "assets/shared_9state_candidate/waving/01.png",
+        "assets/shared_9state_candidate/waving/02.png",
+        "assets/shared_9state_candidate/waving/03.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        280
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "wave"
+    },
+    "hover": {
+      "frames": [
+        "assets/shared_9state_candidate/review/00.png",
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        180
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "hover reaction"
+    },
+    "click": {
+      "frames": [
+        "assets/generated_interaction/grab_start/000.png",
+        "assets/generated_interaction/grab_start/001.png",
+        "assets/generated_interaction/grab_start/002.png",
+        "assets/generated_interaction/grab_start/003.png"
+      ],
+      "durations_ms": [
+        70,
+        70,
+        80,
+        110
+      ],
+      "loop": false,
+      "status": "generated_candidate_not_approved",
+      "not_for_release": true,
+      "label": "click reaction"
+    },
+    "double_click": {
+      "frames": [
+        "assets/shared_9state_candidate/jumping/00.png",
+        "assets/shared_9state_candidate/jumping/01.png",
+        "assets/shared_9state_candidate/jumping/02.png",
+        "assets/shared_9state_candidate/jumping/03.png",
+        "assets/shared_9state_candidate/jumping/04.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        140,
+        280
+      ],
+      "loop": false,
+      "label": "double-click jump (existing jumping frames)",
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "reuse_from": "jumping"
+    },
+    "pat": {
+      "frames": [
+        "assets/dedicated_pat_candidate/000.png",
+        "assets/dedicated_pat_candidate/001.png",
+        "assets/dedicated_pat_candidate/002.png",
+        "assets/dedicated_pat_candidate/003.png",
+        "assets/dedicated_pat_candidate/004.png",
+        "assets/dedicated_pat_candidate/005.png"
+      ],
+      "durations_ms": [
+        90,
+        100,
+        120,
+        140,
+        100,
+        120
+      ],
+      "loop": false,
+      "status": "dedicated_pat_review_candidate_not_approved",
+      "not_for_release": true,
+      "label": "dedicated pat reaction"
+    },
+    "look": {
+      "frames": [
+        "assets/shared_9state_candidate/review/00.png",
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        180
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "look"
+    },
+    "look_away": {
+      "frames": [
+        "assets/shared_9state_candidate/review/02.png",
+        "assets/shared_9state_candidate/review/03.png",
+        "assets/shared_9state_candidate/review/04.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        180
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "look away"
+    },
+    "blink": {
+      "frames": [
+        "assets/shared_9state_candidate/idle/00.png",
+        "assets/shared_9state_candidate/idle/01.png",
+        "assets/shared_9state_candidate/idle/02.png",
+        "assets/shared_9state_candidate/idle/03.png",
+        "assets/shared_9state_candidate/idle/04.png",
+        "assets/shared_9state_candidate/idle/05.png"
+      ],
+      "durations_ms": [
+        200,
+        70,
+        70,
+        70,
+        100,
+        200
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "blink"
+    },
+    "walk_left": {
+      "frames": [
+        "assets/shared_9state_candidate/running-left/00.png",
+        "assets/shared_9state_candidate/running-left/01.png",
+        "assets/shared_9state_candidate/running-left/02.png",
+        "assets/shared_9state_candidate/running-left/03.png",
+        "assets/shared_9state_candidate/running-left/04.png",
+        "assets/shared_9state_candidate/running-left/05.png",
+        "assets/shared_9state_candidate/running-left/06.png",
+        "assets/shared_9state_candidate/running-left/07.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "walk left"
+    },
+    "walk_right": {
+      "frames": [
+        "assets/shared_9state_candidate/running-right/00.png",
+        "assets/shared_9state_candidate/running-right/01.png",
+        "assets/shared_9state_candidate/running-right/02.png",
+        "assets/shared_9state_candidate/running-right/03.png",
+        "assets/shared_9state_candidate/running-right/04.png",
+        "assets/shared_9state_candidate/running-right/05.png",
+        "assets/shared_9state_candidate/running-right/06.png",
+        "assets/shared_9state_candidate/running-right/07.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "walk right"
+    },
+    "run_left": {
+      "frames": [
+        "assets/shared_9state_candidate/running-left/00.png",
+        "assets/shared_9state_candidate/running-left/01.png",
+        "assets/shared_9state_candidate/running-left/02.png",
+        "assets/shared_9state_candidate/running-left/03.png",
+        "assets/shared_9state_candidate/running-left/04.png",
+        "assets/shared_9state_candidate/running-left/05.png",
+        "assets/shared_9state_candidate/running-left/06.png",
+        "assets/shared_9state_candidate/running-left/07.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "run left"
+    },
+    "run_right": {
+      "frames": [
+        "assets/shared_9state_candidate/running-right/00.png",
+        "assets/shared_9state_candidate/running-right/01.png",
+        "assets/shared_9state_candidate/running-right/02.png",
+        "assets/shared_9state_candidate/running-right/03.png",
+        "assets/shared_9state_candidate/running-right/04.png",
+        "assets/shared_9state_candidate/running-right/05.png",
+        "assets/shared_9state_candidate/running-right/06.png",
+        "assets/shared_9state_candidate/running-right/07.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "run right"
+    },
+    "jump": {
+      "frames": [
+        "assets/shared_9state_candidate/jumping/00.png",
+        "assets/shared_9state_candidate/jumping/01.png",
+        "assets/shared_9state_candidate/jumping/02.png",
+        "assets/shared_9state_candidate/jumping/03.png",
+        "assets/shared_9state_candidate/jumping/04.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        140,
+        280
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "jump"
+    },
+    "turn": {
+      "frames": [
+        "assets/shared_9state_candidate/review/00.png",
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png",
+        "assets/shared_9state_candidate/review/03.png"
+      ],
+      "durations_ms": [
+        90,
+        90,
+        90,
+        120
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "turn"
+    },
+    "sit": {
+      "frames": [
+        "assets/shared_9state_candidate/waiting/00.png",
+        "assets/shared_9state_candidate/waiting/01.png",
+        "assets/shared_9state_candidate/waiting/02.png",
+        "assets/shared_9state_candidate/waiting/03.png",
+        "assets/shared_9state_candidate/waiting/04.png",
+        "assets/shared_9state_candidate/waiting/05.png"
+      ],
+      "durations_ms": [
+        150,
+        150,
+        150,
+        150,
+        150,
+        260
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "sit"
+    },
+    "sleep": {
+      "frames": [
+        "assets/shared_9state_candidate/waiting/02.png",
+        "assets/shared_9state_candidate/waiting/03.png",
+        "assets/shared_9state_candidate/waiting/04.png",
+        "assets/shared_9state_candidate/waiting/05.png"
+      ],
+      "durations_ms": [
+        250,
+        250,
+        250,
+        400
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "sleep"
+    },
+    "wake": {
+      "frames": [
+        "assets/shared_9state_candidate/review/00.png",
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png",
+        "assets/shared_9state_candidate/review/03.png"
+      ],
+      "durations_ms": [
+        80,
+        80,
+        120,
+        150
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "wake"
+    },
+    "stretch": {
+      "frames": [
+        "assets/shared_9state_candidate/review/00.png",
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png",
+        "assets/shared_9state_candidate/review/03.png"
+      ],
+      "durations_ms": [
+        90,
+        90,
+        110,
+        130
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "stretch"
+    },
+    "yawn": {
+      "frames": [
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png",
+        "assets/shared_9state_candidate/review/03.png",
+        "assets/shared_9state_candidate/review/04.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        140,
+        180
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "yawn"
+    },
+    "ear_twitch": {
+      "frames": [
+        "assets/shared_9state_candidate/idle/00.png",
+        "assets/shared_9state_candidate/idle/01.png",
+        "assets/shared_9state_candidate/idle/02.png",
+        "assets/shared_9state_candidate/idle/03.png"
+      ],
+      "durations_ms": [
+        110,
+        90,
+        90,
+        130
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "ear twitch"
+    },
+    "tail_wag": {
+      "frames": [
+        "assets/shared_9state_candidate/idle/02.png",
+        "assets/shared_9state_candidate/idle/03.png",
+        "assets/shared_9state_candidate/idle/04.png",
+        "assets/shared_9state_candidate/idle/05.png"
+      ],
+      "durations_ms": [
+        90,
+        90,
+        90,
+        120
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "tail wag"
+    },
+    "head_tilt": {
+      "frames": [
+        "assets/shared_9state_candidate/review/00.png",
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png"
+      ],
+      "durations_ms": [
+        130,
+        130,
+        180
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "head tilt"
+    },
+    "look_around": {
+      "frames": [
+        "assets/shared_9state_candidate/review/00.png",
+        "assets/shared_9state_candidate/review/01.png",
+        "assets/shared_9state_candidate/review/02.png",
+        "assets/shared_9state_candidate/review/03.png",
+        "assets/shared_9state_candidate/review/04.png",
+        "assets/shared_9state_candidate/review/05.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "look around"
+    },
+    "idle_sit": {
+      "frames": [
+        "assets/shared_9state_candidate/waiting/00.png",
+        "assets/shared_9state_candidate/waiting/01.png",
+        "assets/shared_9state_candidate/waiting/02.png",
+        "assets/shared_9state_candidate/waiting/03.png",
+        "assets/shared_9state_candidate/waiting/04.png",
+        "assets/shared_9state_candidate/waiting/05.png"
+      ],
+      "durations_ms": [
+        150,
+        150,
+        150,
+        150,
+        150,
+        260
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "idle sit"
+    },
+    "working": {
+      "frames": [
+        "assets/shared_9state_candidate/running/00.png",
+        "assets/shared_9state_candidate/running/01.png",
+        "assets/shared_9state_candidate/running/02.png",
+        "assets/shared_9state_candidate/running/03.png",
+        "assets/shared_9state_candidate/running/04.png",
+        "assets/shared_9state_candidate/running/05.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "working (shared stationary chin-hand candidate)"
+    },
+    "thinking": {
+      "frames": [
+        "assets/shared_9state_candidate/running/00.png",
+        "assets/shared_9state_candidate/running/01.png",
+        "assets/shared_9state_candidate/running/02.png",
+        "assets/shared_9state_candidate/running/03.png",
+        "assets/shared_9state_candidate/running/04.png",
+        "assets/shared_9state_candidate/running/05.png"
+      ],
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        220
+      ],
+      "loop": true,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "thinking (shared stationary chin-hand candidate)"
+    },
+    "success": {
+      "frames": [
+        "assets/shared_9state_candidate/waving/00.png",
+        "assets/shared_9state_candidate/waving/01.png",
+        "assets/shared_9state_candidate/waving/02.png",
+        "assets/shared_9state_candidate/waving/03.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        280
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "success"
+    },
+    "return_greet": {
+      "frames": [
+        "assets/shared_9state_candidate/waving/00.png",
+        "assets/shared_9state_candidate/waving/01.png",
+        "assets/shared_9state_candidate/waving/02.png",
+        "assets/shared_9state_candidate/waving/03.png"
+      ],
+      "durations_ms": [
+        140,
+        140,
+        140,
+        280
+      ],
+      "loop": false,
+      "status": "shared_candidate_not_approved",
+      "not_for_release": true,
+      "label": "return greet"
+    }
+  },
+  "deployment_note": "Wave-aligned 9-state common export on diagonal-drag Linux candidate. Not final artwork approval, GPT v2 install, Windows release, or live desktop certification.",
+  "shared_candidate": {
+    "source_library_file_id": "libfile_0a5fd1edce7c8191964e3931ed04c3c0",
+    "source_zip_sha256": "c2c88b1ac8e1167d2f509078322336d824b4602bf5b9011c1e98f56ac6574cc0",
+    "atlas_sha256": "54c0dc9d0af6e1c361b3d293cb2d44be4090e489c47b1457454b5ed5ea3b53f9",
+    "frame_count": 57,
+    "final_art_approved": false,
+    "gpt_v2_installed": false
+  },
+  "dedicated_pat_candidate": {
+    "review_only": true,
+    "final_art_approved": false,
+    "native_playback_verified": false,
+    "six_frame_duration_ms": 670
+  }
+}

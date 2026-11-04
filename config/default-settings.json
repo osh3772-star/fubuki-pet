@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "gravity": 1800.0,
+    "terminal_velocity": 1800.0,
+    "restitution": 0.1,
+    "friction": 7.0,
+    "drag_inertia": 0.3,
+    "drag_threshold": 8.0,
+    "max_throw_speed": 1200.0,
+    "double_click_seconds": 0.3,
+    "sit_after": 120.0,
+    "sleep_after": 300.0,
+    "idle_fps": 12,
+    "active_fps": 60,
+    "scale": 1.0,
+    "always_on_top": true,
+    "event_inbox_enabled": false
+  },
+  "candidate_art": true
+}

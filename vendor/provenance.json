@@ -1,0 +1,11 @@
+{
+  "repository": "openai/skills",
+  "path": "skills/.curated/hatch-pet/scripts/validate_atlas.py",
+  "commit": "c25113bf4c64c8dba6bfe61acf06051d79aa43f6",
+  "commit_date": "2026-05-12T22:24:22Z",
+  "expected_git_blob_sha1": "e3492c17ccd23b432b05387812d409ded1779634",
+  "actual_git_blob_sha1": "e3492c17ccd23b432b05387812d409ded1779634",
+  "verified_exact_bytes": true,
+  "accessed": "2026-11-03",
+  "source_url": "https://github.com/openai/skills/blob/c25113bf4c64c8dba6bfe61acf06051d79aa43f6/skills/.curated/hatch-pet/scripts/validate_atlas.py"
+}

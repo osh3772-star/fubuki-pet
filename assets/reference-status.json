@@ -1,0 +1,10 @@
+{
+  "canonical_approved": false,
+  "approved_reference_sha256": null,
+  "front_candidate": "assets/sources/front_candidate.png",
+  "front_sha256": "4134e807ec05b84788fd1f7536e984025c42f1f7ab3762d0408d0e119edb0c63",
+  "left": null,
+  "right": null,
+  "back": null,
+  "note": "No new character design was invented. Front is a previous generated candidate, not an approved original."
+}
