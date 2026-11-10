@@ -2,7 +2,8 @@
 from __future__ import annotations
 import threading
 from PySide6.QtCore import QThread, QTimer, Signal, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QTextEdit, QPlainTextEdit, QMessageBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QPlainTextEdit, QMessageBox
+from .ui_controls import RoundedComboBox as QComboBox
 
 
 PROVIDER_CONNECT_LABELS = {

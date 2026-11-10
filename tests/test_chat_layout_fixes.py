@@ -8,6 +8,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QInputMethodEvent
 from PySide6.QtWidgets import QApplication
 from windows_pet.chat_bubble import BubbleChat, BubbleInput
+from windows_pet.ui_controls import RoundedComboBox
+from PySide6.QtWidgets import QComboBox
 from test_chat_ui import FakeClient
 
 
@@ -72,6 +74,13 @@ class ChatLayoutFixTests(unittest.TestCase):
         required = combo.fontMetrics().horizontalAdvance('Gemini') + 38
         self.assertGreaterEqual(combo.width(), required)
         self.assertEqual(combo.objectName(), 'bubbleProvider')
+
+    def test_every_settings_dropdown_uses_custom_rounded_paint(self):
+        window = self.make_window()
+        combos = window.findChildren(QComboBox)
+        self.assertGreaterEqual(len(combos), 4)
+        for combo in combos:
+            self.assertIsInstance(combo, RoundedComboBox, combo.accessibleName())
 
 if __name__ == '__main__':
     unittest.main()

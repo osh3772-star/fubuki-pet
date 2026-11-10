@@ -1,7 +1,8 @@
 """Character-anchored chat. The existing ChatWindow owns all auth and workers."""
 from PySide6.QtCore import Qt, QTimer, Signal, QRect, QEvent, QPoint, QRectF
 from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QPainter, QPainterPath, QColor, QPen, QFontDatabase, QTextCursor, QTextBlockFormat
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QPlainTextEdit, QLabel, QComboBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QPlainTextEdit, QLabel
+from .ui_controls import RoundedComboBox as QComboBox
 from .chat_window import ChatWindow
 
 _LOADED_FONT_FAMILIES = None
@@ -239,25 +240,7 @@ def place_launcher(head,area,width=48,height=26):
 
 
 class ProviderComboBox(QComboBox):
-    """Rounded arrow with no native square Windows drop-down subcontrol."""
-    def paintEvent(self,event):
-        painter=QPainter(self);painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor('#3685AE' if self.hasFocus() else '#CAE2F0'),1.5))
-        painter.setBrush(QColor('#EAF5FC' if self.isEnabled() else '#EDF1F4'))
-        painter.drawRoundedRect(QRectF(self.rect()).adjusted(1,1,-1,-1),12,12)
-        arrow=QRectF(self.width()-26,3,22,self.height()-6)
-        painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor('#D9EFFB'))
-        painter.drawRoundedRect(arrow,9,9)
-        painter.setPen(QColor('#203E55' if self.isEnabled() else '#758692'))
-        text_rect=self.rect().adjusted(10,0,-29,0)
-        label=self.fontMetrics().elidedText(self.currentText(),Qt.TextElideMode.ElideRight,text_rect.width())
-        painter.drawText(text_rect,Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,label)
-        center=arrow.center()
-        pen=QPen(QColor('#49718A' if self.isEnabled() else '#91A7B4'),1.6)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap);pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        path=QPainterPath();path.moveTo(center.x()-3,center.y()-1);path.lineTo(center.x(),center.y()+2);path.lineTo(center.x()+3,center.y()-1)
-        painter.drawPath(path)
+    """Named subtype for the compact provider control."""
 
 
 class BubbleChat(ChatWindow):
