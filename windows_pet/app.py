@@ -66,6 +66,8 @@ def main()->int:
         except ImportError:
             print('Install PySide6 or PyQt5 to run Fubuki Pet.',file=sys.stderr);return 3
     app=QApplication(sys.argv[:1]);app.setApplicationName('FubukiPet');app.setQuitOnLastWindowClosed(False)
+    app_icon=QIcon(str(ROOT/'assets/app-icon.ico'))
+    app.setWindowIcon(app_icon)
     store=data_directory();store.mkdir(parents=True,exist_ok=True)
     instance_lock=QLockFile(str(store/'instance.lock'))
     instance_lock.setStaleLockTime(0)
@@ -106,7 +108,7 @@ def main()->int:
             self.menu.setStyleSheet(SKY_THEME)
             # Popups take mouse events, including a held button's release.
             self.menu.aboutToShow.connect(engine.cancel_pointer)
-            self.tray=QSystemTrayIcon(QIcon(str(default_path)),app);self.tray.setToolTip('Fubuki Pet')
+            self.tray=QSystemTrayIcon(app_icon,app);self.tray.setToolTip('Fubuki Pet')
             self.tray.setContextMenu(self.menu);self.tray.activated.connect(lambda reason:self.open_context_bubble() if reason in (QSystemTrayIcon.ActivationReason.Trigger,QSystemTrayIcon.ActivationReason.Context) else None);self.tray.show()
             self.build_menu();self.render_current();self.move(round(engine.x),round(engine.y));self.show();self.timer.start(30)
         def build_menu(self):

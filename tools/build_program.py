@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 def runtime_files(root: Path = ROOT) -> list[Path]:
     registry_path = root / 'assets/runtime_candidate.json'
     registry = json.loads(registry_path.read_text(encoding='utf-8'))
-    names = {'assets/runtime_candidate.json', 'config/default-settings.json', registry['placeholder']}
+    names = {'assets/runtime_candidate.json', 'assets/app-icon.ico', 'config/default-settings.json', registry['placeholder']}
     # Chat typography is app-private: bundle both fonts and their OFL notices.
     names.update('assets/fonts/' + name for name in (
         'NotoSansKR.ttf', 'NotoSansKR-OFL.txt',
@@ -68,6 +68,7 @@ def main() -> int:
     output = ROOT / 'dist' / stamp
     work = ROOT / 'build' / stamp
     options = ['--noconfirm', '--clean', '--windowed', '--onedir', '--noupx',
+               '--icon', str(ROOT / 'assets/app-icon.ico'),
                '--name', 'FubukiPet', '--distpath', str(output), '--workpath', str(work / 'work'),
                '--specpath', str(work), '--paths', str(ROOT),
                '--exclude-module', 'PyQt5', '--exclude-module', 'PyQt6', '--exclude-module', 'PySide2']
@@ -80,11 +81,14 @@ def main() -> int:
     folder = output / 'FubukiPet'
     exe = folder / 'FubukiPet.exe'
     if not exe.is_file(): raise RuntimeError('PyInstaller did not create FubukiPet.exe')
+    from tools.verify_exe_icon import verify
+    icon_verification = verify(exe, ROOT / 'assets/app-icon.ico')
     from tools.verify_bundle_icu import repair
     runtime_compatibility = repair(folder)
     info = {'program': 'Fubuki Pet', 'version': '1.0.0', 'built_at_utc': stamp,
             'platform': platform.platform(), 'python': sys.version,
             'runtime_compatibility': runtime_compatibility,
+            'icon_verification': icon_verification,
             'exe_sha256': sha(exe), 'manual_validation': 'user_pending',
             'artwork': 'existing integrated illustrations; original provenance retained in source',
             'source_files': {p.relative_to(ROOT).as_posix(): sha(p)
