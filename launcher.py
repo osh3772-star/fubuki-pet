@@ -15,6 +15,8 @@ def launch_arguments(arguments:list[str], frozen:bool)->list[str]:
 
 
 def launch()->int:
+    # Trial never touches the original pet data, instance lock, or startup entry.
+    os.environ.setdefault('FUBUKI_DATA_DIR', str(Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'FubukiPetBubbleTrial'))
     from windows_pet.events import data_directory
     folder=data_directory()/'logs'
     folder.mkdir(parents=True, exist_ok=True)

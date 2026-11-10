@@ -10,12 +10,17 @@ import sys
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 
 def runtime_files(root: Path = ROOT) -> list[Path]:
     registry_path = root / 'assets/runtime_candidate.json'
     registry = json.loads(registry_path.read_text(encoding='utf-8'))
     names = {'assets/runtime_candidate.json', 'config/default-settings.json', registry['placeholder']}
+    # Chat typography is app-private: bundle both fonts and their OFL notices.
+    names.update('assets/fonts/' + name for name in (
+        'NotoSansKR.ttf', 'NotoSansKR-OFL.txt',
+        'NotoSansJP.ttf', 'NotoSansJP-OFL.txt'))
     for clip in registry['clips'].values():
         names.update(clip['frames'])
     files = []
@@ -39,6 +44,8 @@ def package(folder: Path) -> Path:
     exe = folder / 'FubukiPet.exe'
     if not exe.is_file() or exe.read_bytes()[:2] != b'MZ':
         raise RuntimeError('An actual Windows executable is required for Windows packaging.')
+    from tools.prepare_bundle import prepare
+    prepare(folder)
     readme = ROOT / 'README_ko.txt'
     if readme.exists(): shutil.copy2(readme, folder / readme.name)
     files = {p.relative_to(folder).as_posix(): sha(p) for p in sorted(folder.rglob('*'))
@@ -73,8 +80,11 @@ def main() -> int:
     folder = output / 'FubukiPet'
     exe = folder / 'FubukiPet.exe'
     if not exe.is_file(): raise RuntimeError('PyInstaller did not create FubukiPet.exe')
+    from tools.verify_bundle_icu import repair
+    runtime_compatibility = repair(folder)
     info = {'program': 'Fubuki Pet', 'version': '1.0.0', 'built_at_utc': stamp,
             'platform': platform.platform(), 'python': sys.version,
+            'runtime_compatibility': runtime_compatibility,
             'exe_sha256': sha(exe), 'manual_validation': 'user_pending',
             'artwork': 'existing integrated illustrations; original provenance retained in source',
             'source_files': {p.relative_to(ROOT).as_posix(): sha(p)

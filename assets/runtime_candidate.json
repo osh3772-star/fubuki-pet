@@ -1143,7 +1143,6 @@
   },
   "deployment_note": "Wave-aligned 9-state common export on diagonal-drag Linux candidate. Not final artwork approval, GPT v2 install, Windows release, or live desktop certification.",
   "shared_candidate": {
-    "source_library_file_id": "libfile_0a5fd1edce7c8191964e3931ed04c3c0",
     "source_zip_sha256": "c2c88b1ac8e1167d2f509078322336d824b4602bf5b9011c1e98f56ac6574cc0",
     "atlas_sha256": "54c0dc9d0af6e1c361b3d293cb2d44be4090e489c47b1457454b5ed5ea3b53f9",
     "frame_count": 57,

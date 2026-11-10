@@ -46,6 +46,8 @@ def restore_saved_position(engine, saved):
 def main()->int:
     ap=argparse.ArgumentParser(description='Fubuki desktop pet')
     ap.add_argument('--candidate-art',action='store_true',help=argparse.SUPPRESS)
+    ap.add_argument('--chat-mock',action='store_true',help='No-network ChatGPT chat test')
+    ap.add_argument('--chat',action='store_true',help='Open subscription chat')
     ap.add_argument('--debug',action='store_true',help='Open the state and animation panel')
     args=ap.parse_args()
     try:
@@ -53,6 +55,8 @@ def main()->int:
         from PySide6.QtGui import QPainter,QPixmap,QRegion,QCursor,QAction,QIcon
         from PySide6.QtWidgets import QApplication,QWidget,QMenu,QSystemTrayIcon,QMessageBox,QVBoxLayout,QLabel,QPushButton,QHBoxLayout,QComboBox
     except ImportError:
+        import traceback
+        traceback.print_exc()
         if sys.platform != 'linux':
             print('PySide6 is not installed. Run setup_windows.cmd first.',file=sys.stderr);return 3
         try:
@@ -97,7 +101,7 @@ def main()->int:
             self.displayed='';self.missing_art=True;self.last_cursor=None;self.last_inbox=0.;self.last_save=0.;self.last_screens=0.
             self.trace_previous=None;self.trace_path=os.environ.get('FUBUKI_FRAME_TRACE')
             self.last_state='';self.timer=QTimer(self);self.timer.timeout.connect(self.tick)
-            self.menu=QMenu(self);self.debug=None
+            self.menu=QMenu(self);self.debug=None;self.chat=None
             # Popups take mouse events, including a held button's release.
             self.menu.aboutToShow.connect(engine.cancel_pointer)
             self.tray=QSystemTrayIcon(QIcon(str(default_path)),app);self.tray.setToolTip('Fubuki Pet')
@@ -107,7 +111,14 @@ def main()->int:
             self.menu.clear()
             title=self.menu.addAction('Fubuki Pet');title.setEnabled(False)
             self.status_action=self.menu.addAction('');self.status_action.setEnabled(False)
-            self.menu.addSeparator();self.menu.addAction('동작 패널 / 상태 보기',self.open_debug)
+            self.menu.addSeparator();self.menu.addAction('ChatGPT 구독 채팅',self.open_chat)
+            providers_menu=self.menu.addMenu('대화 공급자 선택 (ChatGPT · Gemini · Antigravity)')
+            providers_menu.addAction('ChatGPT 구독',lambda:self.open_chat_provider('chatgpt'))
+            providers_menu.addAction('Gemini (로컬 Gemini CLI)',lambda:self.open_chat_provider('gemini'))
+            providers_menu.addAction('Antigravity Gemini (로컬 Antigravity)',lambda:self.open_chat_provider('antigravity_gemini'))
+            providers_menu.addSeparator()
+            providers_menu.addAction('계정 · 모델 설정 열기',self.open_chat_settings)
+            self.menu.addAction('동작 패널 / 상태 보기',self.open_debug)
             actions=self.menu.addMenu('수동 작업 상태 (실제 ChatGPT 상태 아님)')
             for name in ['working','thinking','waiting','success','failed','review','idle']:
                 actions.addAction(name,lambda checked=False,n=name:engine.job_event(n,'manual','debug'))
@@ -116,7 +127,7 @@ def main()->int:
             top=self.menu.addAction('항상 위에 표시');top.setCheckable(True);top.setChecked(settings.always_on_top);top.triggered.connect(self.toggle_top)
             inbox=self.menu.addAction('로컬 앱 / 공식 Codex hook 이벤트 수신');inbox.setCheckable(True);inbox.setChecked(settings.event_inbox_enabled);inbox.triggered.connect(self.toggle_inbox)
             motion=self.menu.addAction('움직임 줄이기');motion.setCheckable(True);motion.setChecked(engine.reduced_motion);motion.triggered.connect(self.toggle_motion)
-            startup=self.menu.addAction('Windows 로그인 시 자동 시작');startup.setCheckable(True);startup.setChecked(self.startup_enabled());startup.setEnabled(sys.platform=='win32');startup.triggered.connect(self.toggle_startup)
+            startup=self.menu.addAction('Windows 로그인 시 자동 시작');startup.setCheckable(True);startup.setChecked(self.startup_enabled());startup.setEnabled(False);startup.triggered.connect(self.toggle_startup)
             self.menu.addAction('화면으로 다시 데려오기',self.bring_back)
             self.menu.addSeparator();self.menu.addAction('종료',self.quit)
         def bring_back(self):
@@ -248,10 +259,28 @@ def main()->int:
             try:
                 p=store/'settings.json';tmp=store/'settings.json.tmp';tmp.write_text(json.dumps(obj,indent=2),encoding='utf-8');tmp.replace(p)
             except OSError:pass
+        def _ensure_chat(self):
+            from .chat_bubble import BubbleChat as ChatWindow
+            if self.chat is None:
+                self.chat=ChatWindow(store/'chatgpt',mock=args.chat_mock,anchor=self)
+                self.chat.state_changed.connect(lambda state:engine.job_event(state,'local_app',getattr(self.chat,'current_provider','chatgpt')))
+            return self.chat
+        def open_chat(self):
+            self._ensure_chat().open_bubble()
+        def open_chat_provider(self,provider_code):
+            chat=self._ensure_chat()
+            chat.select_provider(provider_code)
+            chat.open_bubble()
+        def open_chat_settings(self):
+            chat=self._ensure_chat()
+            chat.open_settings()
         def open_debug(self):
             if self.debug is None:self.debug=DebugPanel()
             self.debug.show();self.debug.raise_();self.debug.refresh()
-        def quit(self):self.save();self.tray.hide();app.quit()
+        def quit(self):
+            if self.chat and not self.chat.shutdown():
+                QMessageBox.information(self,'후부키','연결 요청이 종료되는 중입니다. 잠시 후 다시 종료해 주세요.');return
+            self.save();self.tray.hide();app.quit()
 
     class DebugPanel(QWidget):
         def __init__(self):
@@ -271,6 +300,7 @@ def main()->int:
             self.details.setText(json.dumps(engine.snapshot(),ensure_ascii=False,indent=2)+'\nDISPLAY: '+overlay.displayed)
             self.trace.setText('최근 전환: '+' → '.join(x['to'] for x in list(engine.history)[-8:]))
     overlay=Overlay()
+    if args.chat or args.chat_mock:overlay.open_chat()
     if args.debug:overlay.open_debug()
     app.aboutToQuit.connect(overlay.save)
     return app.exec()
