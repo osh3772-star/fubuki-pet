@@ -401,6 +401,20 @@ class MultiProviderUITests(unittest.TestCase):
         self.assertEqual(self.window.expand_button.text(), "펼치기")
         self.assertEqual(self.window.bubble.width(), 286)
 
+    def test_settings_window_matches_snow_bubble_design(self):
+        self.window.open_settings()
+        self.app.processEvents()
+        self.assertTrue(self.window.isVisible())
+        self.assertEqual(self.window.objectName(), "fubukiSettings")
+        self.assertTrue(self.window.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
+        self.assertTrue(bool(self.window.windowFlags() & Qt.WindowType.FramelessWindowHint))
+        self.assertEqual(self.window.settings_card.objectName(), "settingsCard")
+        self.assertFalse(self.window.standalone_chat_box.isVisible())
+        self.assertFalse(self.window.grab().isNull())
+        self.window.close_settings_button.click()
+        self.app.processEvents()
+        self.assertFalse(self.window.isVisible())
+
 
 if __name__ == "__main__":
     unittest.main()

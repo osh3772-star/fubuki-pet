@@ -24,14 +24,16 @@ def load_chat_fonts():
 # Original snow/sky palette. No artwork or font from reference games is bundled.
 SKY_THEME = """
 QWidget { font-family: 'Noto Sans KR', 'Noto Sans JP', 'Malgun Gothic', 'Yu Gothic UI'; font-size: 12px; color: #203E55; }
-QWidget#fubukiBubble, QLabel { background: transparent; }
+QWidget#fubukiBubble, QWidget#fubukiSettings, QLabel { background: transparent; }
+QWidget#settingsCard { background: #EDF8FF; border: 1px solid #A6D4EC; border-radius: 14px; }
 QLabel#speaker { color: #183E59; font-size: 14px; font-weight: 600; }
 QLabel#status { color: #48677B; font-size: 11px; padding-bottom: 3px; }
 QLabel#inputLabel { color: #42687D; font-size: 11px; font-weight: 600; }
+QLabel#captionNote { color: #48677B; font-size: 11px; background: #F1F9FE; border: 1px solid #D5EAF7; border-radius: 10px; padding: 6px 8px; }
 QTextEdit { background: transparent; border: none; border-radius: 10px; padding: 4px; color: #203E55; font-size: 14px; selection-background-color: #C5E9FF; }
 QPlainTextEdit { background: #EDF8FF; border: 1px solid #A6D4EC; border-radius: 14px; padding: 4px; color: #203E55; font-size: 14px; selection-background-color: #B0DDF5; }
 QPlainTextEdit:focus { border: 2px solid #3685AE; }
-QComboBox { background: #EAF5FC; border: 1px solid #CAE2F0; border-radius: 8px; padding: 1px 4px; color: #203E55; font-size: 11px; }
+QComboBox { background: #EAF5FC; border: 1px solid #CAE2F0; border-radius: 8px; padding: 2px 6px; color: #203E55; font-size: 11px; min-height: 20px; }
 QComboBox:hover { background: #D6EEFC; border-color: #76B6D7; }
 QComboBox:disabled { color: #758692; background: #EDF1F4; border-color: #DCE4E9; }
 QPushButton { background: #EAF5FC; border: 1px solid #CAE2F0; border-radius: 10px; padding: 3px 6px; color: #31596E; }
@@ -131,8 +133,15 @@ class BubbleChat(ChatWindow):
         self.expanded=False
         self.expand_button=None
         super().__init__(data_dir,mock,client,providers=providers)
-        self.anchor=anchor;self.side='right'
+        self.anchor=anchor;self.side='right';self._drag_offset=None
         self.setWindowTitle('후부키 계정 · 모델 설정')
+        settings_flags=(Qt.WindowType.Window if mock else Qt.WindowType.Tool)|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(settings_flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setStyleSheet(SKY_THEME)
+        if hasattr(self,'standalone_chat_box'):
+            self.standalone_chat_box.hide()
+        QShortcut(QKeySequence('Escape'),self,activated=self.hide)
         self.bubble=SnowBubble()
         if mock:
             # Keep offline validation discoverable by native accessibility tools.
@@ -246,7 +255,38 @@ class BubbleChat(ChatWindow):
     def fold_bubble(self):
         self.bubble.hide();self.follow_anchor(force=True);self.launch_button.show()
     def open_settings(self):
-        self.showNormal();self.raise_();self.activateWindow()
+        self.ensurePolished();self.adjustSize()
+        target_w=340;target_h=max(320,self.sizeHint().height())
+        base=self.bubble.geometry() if self.bubble.isVisible() else (self.anchor.frameGeometry() if self.anchor else QRect(500,360,160,180))
+        screen=QGuiApplication.screenAt(base.center()) or QGuiApplication.primaryScreen()
+        if screen:
+            area=screen.availableGeometry()
+            geom,_=place_bubble(base,area,target_w,target_h,self.side)
+            self.setGeometry(geom)
+        else:
+            self.resize(target_w,target_h)
+        self.showNormal();self.raise_();self.activateWindow();self.update()
+    def paintEvent(self,event):
+        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        body=QPainterPath();body.addRoundedRect(6,3,self.width()-12,self.height()-6,22,22)
+        p.setPen(QPen(QColor('#AFD7EC'),1.5));p.setBrush(QColor('#F8FCFF'));p.drawPath(body)
+    def mousePressEvent(self,event):
+        if event.button()==Qt.MouseButton.LeftButton:
+            pos=event.position().toPoint() if hasattr(event,'position') else event.pos()
+            if pos.y()<=42:
+                gpos=event.globalPosition().toPoint() if hasattr(event,'globalPosition') else event.globalPos()
+                self._drag_offset=gpos-self.frameGeometry().topLeft()
+                event.accept();return
+        super().mousePressEvent(event)
+    def mouseMoveEvent(self,event):
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            gpos=event.globalPosition().toPoint() if hasattr(event,'globalPosition') else event.globalPos()
+            self.move(gpos-self._drag_offset)
+            event.accept();return
+        super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self,event):
+        self._drag_offset=None
+        super().mouseReleaseEvent(event)
     def follow_anchor(self,force=False):
         rect=self.anchor.frameGeometry() if self.anchor else QRect(500,400,160,180)
         screen=QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
