@@ -2,7 +2,7 @@ import tempfile,unittest
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch
-from tools.verify_bundle_icu import repair
+from tools.verify_bundle_icu import repair,validate_binary_toc
 class ICURepairTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
@@ -35,3 +35,16 @@ class ICURepairTests(unittest.TestCase):
         with patch('tools.verify_bundle_icu.pefile.PE',self.pe),patch.dict('os.environ',{'SystemRoot':str(self.system)}):
             with self.assertRaises(RuntimeError):repair(self.bundle)
         self.assertEqual(backup.read_bytes(),b'keep');self.assertTrue(self.candidate.exists())
+    def test_onefile_filters_collision_before_archive_without_changing_source(self):
+        self.prepare();(self.system/'System32/icuuc.dll').write_bytes(b'system')
+        toc=[('icuuc.dll',str(self.candidate),'BINARY'),('consumer.dll',str(self.internal/'consumer.dll'),'BINARY')]
+        with patch('tools.verify_bundle_icu.pefile.PE',self.pe),patch.dict('os.environ',{'SystemRoot':str(self.system)}):
+            result,report=validate_binary_toc(toc)
+        self.assertEqual(result,[toc[1]])
+        self.assertEqual(report['status'],'incompatible_icu_excluded_before_archive')
+        self.assertEqual(self.candidate.read_bytes(),b'original')
+    def test_onefile_missing_fallback_stops_build(self):
+        self.prepare()
+        toc=[('icuuc.dll',str(self.candidate),'BINARY'),('consumer.dll',str(self.internal/'consumer.dll'),'BINARY')]
+        with patch('tools.verify_bundle_icu.pefile.PE',self.pe),patch.dict('os.environ',{'SystemRoot':str(self.system)}):
+            with self.assertRaises(RuntimeError):validate_binary_toc(toc)

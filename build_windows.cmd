@@ -11,7 +11,7 @@ if errorlevel 1 goto error
 ".venv\Scripts\python.exe" tools\build_program.py > "logs\build.log" 2>&1
 if errorlevel 1 goto error
 type "logs\build.log"
-echo Build complete. Keep the whole FubukiPet folder together.
+echo Build complete. FubukiPet.exe is standalone and can be moved by itself.
 exit /b 0
 :error
 echo Build failed. See logs\build.log and logs\build-dependencies.log.

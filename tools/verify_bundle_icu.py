@@ -3,6 +3,34 @@ from pathlib import Path
 import json,os,hashlib
 import pefile
 
+def validate_binary_toc(binaries):
+    """Check ICU imports before a one-file archive makes DLLs immutable."""
+    binaries=list(binaries)
+    candidates=[item for item in binaries if Path(item[0]).name.lower()=='icuuc.dll']
+    if not candidates:return binaries,{'status':'no_bundled_icu'}
+    def exports(path):
+        pe=pefile.PE(str(path))
+        result={s.name for s in getattr(pe,'DIRECTORY_ENTRY_EXPORT').symbols if s.name}
+        pe.close();return result
+    required=set()
+    for _,source,kind in binaries:
+        if kind!='BINARY' or Path(source).suffix.lower()!='.dll':continue
+        pe=pefile.PE(str(source),fast_load=True);pe.parse_data_directories(directories=[1])
+        for entry in getattr(pe,'DIRECTORY_ENTRY_IMPORT',[]):
+            if entry.dll.lower()==b'icuuc.dll':
+                if any(item.name is None for item in entry.imports):raise RuntimeError('Ordinal ICU import needs review')
+                required.update(item.name for item in entry.imports)
+        pe.close()
+    incompatible=[item for item in candidates if not required.issubset(exports(item[1]))]
+    if not incompatible:return binaries,{'status':'compatible_bundled_icu'}
+    system=Path(os.environ['SystemRoot'])/'System32/icuuc.dll'
+    if not system.is_file() or not required.issubset(exports(system)):
+        raise RuntimeError('No verified system ICU fallback; one-file build stopped')
+    return [item for item in binaries if item not in incompatible],{
+        'status':'incompatible_icu_excluded_before_archive',
+        'requires':'Windows system ICU; required exports verified before build',
+        'system_icu_sha256':hashlib.sha256(system.read_bytes()).hexdigest()}
+
 def repair(folder):
     folder=Path(folder).resolve()
     internal=folder/'_internal'

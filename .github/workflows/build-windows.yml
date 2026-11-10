@@ -48,13 +48,15 @@ jobs:
           & .\.venv\Scripts\python.exe tools/build_program.py
           exit $LASTEXITCODE
 
-      - name: Check packaged entry point without opening a desktop window
+      - name: Verify standalone EXE after relocation and offline GUI startup
         env:
           FUBUKI_DATA_DIR: ${{ runner.temp }}\fubuki-build-check
         run: |
           $bundle = (Get-Content dist/latest-build.txt -Raw).Trim()
           $exe = Join-Path $bundle 'FubukiPet.exe'
           if (-not (Test-Path -LiteralPath $exe)) { throw 'FubukiPet.exe was not created.' }
+          & .\.venv\Scripts\python.exe tools/smoke_moved_build.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $process = Start-Process -FilePath $exe -ArgumentList '--help' -PassThru
           if (-not $process.WaitForExit(30000)) {
             $process.Kill()

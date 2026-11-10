@@ -49,7 +49,9 @@ def main()->int:
     ap.add_argument('--chat-mock',action='store_true',help='No-network ChatGPT chat test')
     ap.add_argument('--chat',action='store_true',help='Open subscription chat')
     ap.add_argument('--debug',action='store_true',help='Open the state and animation panel')
+    ap.add_argument('--smoke-test',action='store_true',help=argparse.SUPPRESS)
     args=ap.parse_args()
+    if args.smoke_test and not args.chat_mock:ap.error('--smoke-test requires offline --chat-mock')
     try:
         from PySide6.QtCore import Qt,QTimer,QPoint,QLockFile
         from PySide6.QtGui import QPainter,QPixmap,QRegion,QCursor,QAction,QIcon
@@ -366,6 +368,7 @@ def main()->int:
     if args.chat or args.chat_mock:overlay.open_chat()
     else:QTimer.singleShot(0,overlay._ensure_chat)
     if args.debug:overlay.open_debug()
+    if args.smoke_test:QTimer.singleShot(1200,app.quit)
     app.aboutToQuit.connect(overlay.save)
     return app.exec()
 
