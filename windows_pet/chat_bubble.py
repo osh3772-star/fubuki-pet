@@ -232,7 +232,11 @@ class BubbleChat(ChatWindow):
         lines=[]
         if self.pending_user:
             lines.append('💬 나: '+self.pending_user)
-            lines.append('후부키: '+self._compact_reply_text(self.current_text))
+            if self.current_text:
+                cursor='▍' if not footer else ''
+                lines.append('후부키: '+self._compact_reply_text(self.current_text)+cursor)
+            else:
+                lines.append('후부키: '+('…' if not footer else ''))
         elif self.history:
             last=self.history[-1]
             if last['role']=='assistant':

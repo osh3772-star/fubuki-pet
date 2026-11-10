@@ -15,7 +15,7 @@ from PySide6.QtGui import QInputMethodEvent
 from PySide6.QtWidgets import QApplication
 
 from windows_pet.chat_bubble import BubbleChat
-from windows_pet.chat_window import ChatWindow
+from windows_pet.chat_window import ChatWindow, Operation
 from windows_pet.chatgpt_client import (
     ChatGPTError,
     Cancelled,
@@ -414,6 +414,28 @@ class MultiProviderUITests(unittest.TestCase):
         self.window.close_settings_button.click()
         self.app.processEvents()
         self.assertFalse(self.window.isVisible())
+
+    def test_character_by_character_typewriter_animation(self):
+        # Verify Operation splits a single large chunk into character-by-character deltas
+        emitted_chars = []
+        op = Operation(
+            lambda cancel, emit: (emit("안녕 후부키!"), "안녕 후부키!")[1],
+            char_delay=0.001,
+        )
+        op.delta.connect(emitted_chars.append)
+        op.run()
+        self.assertEqual(emitted_chars, list("안녕 후부키!"))
+
+        # Verify live typing cursor appears during streaming and disappears on completion
+        self.window.pending_user = "인사해줘"
+        self.window.current_text = "안녕하"
+        self.window.render()
+        self.assertIn("후부키: 안녕하▍", self.window.transcript.toPlainText())
+        self.window.on_result_test_complete = None
+        self.window.operation = "chat"
+        self.window.on_result("안녕하세요!")
+        self.assertNotIn("▍", self.window.transcript.toPlainText())
+        self.assertIn("후부키: 안녕하세요!", self.window.transcript.toPlainText())
 
 
 if __name__ == "__main__":

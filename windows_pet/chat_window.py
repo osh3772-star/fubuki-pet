@@ -34,13 +34,31 @@ class Operation(QThread):
     delta = Signal(str)
     result = Signal(object)
     failed = Signal(str)
-    def __init__(self, action):
+    def __init__(self, action, char_delay=None):
         super().__init__()
+        import os
         self.action = action
         self.cancel = threading.Event()
+        if char_delay is None:
+            self.char_delay = 0.001 if os.environ.get('QT_QPA_PLATFORM') == 'offscreen' else 0.022
+        else:
+            self.char_delay = float(char_delay)
+    def _emit_delta(self, text):
+        if not text or self.cancel.is_set():
+            return
+        delay = self.char_delay
+        if delay > 0 and len(text) > 120:
+            delay = max(0.008, delay * 80.0 / len(text))
+        for ch in text:
+            if self.cancel.is_set():
+                return
+            self.delta.emit(ch)
+            if delay > 0 and not ch.isspace():
+                if self.cancel.wait(delay):
+                    return
     def run(self):
         try:
-            value = self.action(self.cancel, self.delta.emit)
+            value = self.action(self.cancel, self._emit_delta)
             if self.cancel.is_set(): self.failed.emit('요청을 중지했습니다.')
             else: self.result.emit(value)
         except Exception as exc:
@@ -385,7 +403,8 @@ class ChatWindow(QWidget):
         for item in self.history:
             lines.append(('나: ' if item['role']=='user' else '후부키: ') + item['content'])
         if self.pending_user:
-            lines += ['나: '+self.pending_user, '후부키: '+self.current_text]
+            typing_text = (self.current_text + '▍') if (self.current_text and not footer) else (self.current_text or ('…' if not footer else ''))
+            lines += ['나: '+self.pending_user, '후부키: '+typing_text]
         if footer: lines.append(footer)
         self.transcript.setPlainText('\n\n'.join(lines))
         self.transcript.verticalScrollBar().setValue(self.transcript.verticalScrollBar().maximum())
