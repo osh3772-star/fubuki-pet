@@ -45,6 +45,14 @@ GEMINI_CLI_MODELS = (
 VALID_GEMINI_CLI_SLUGS = frozenset(slug for slug, _ in GEMINI_CLI_MODELS)
 GEMINI_CLI_EFFORTS = ("low", "high")
 ANTIGRAVITY_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+ANTIGRAVITY_DEFAULT_GEMINI_MODELS = (
+    ("gemini-4-argon-high", "Gemini 4 Argon (High)"),
+    ("gemini-4-argon-medium", "Gemini 4 Argon (Medium)"),
+    ("gemini-4-argon-low", "Gemini 4 Argon (Low)"),
+    ("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"),
+    ("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)"),
+    ("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"),
+)
 
 STRIPPED_API_KEY_VARS = (
     "GEMINI_API_KEY",
@@ -119,7 +127,7 @@ def _validate_and_format_messages(messages: list[dict]) -> str:
         role = message["role"]
         speaker = "시스템" if role == "developer" else ("사용자" if role == "user" else "후부키")
         lines.append(f"{speaker}: {content}")
-    lines.append("\n위 대화의 마지막 사용자 발화에 대해 후부키로서 자연스럽고 간결하게 한국어로 답하세요.")
+    lines.append("\n위 대화의 마지막 사용자 발화에 대해 후부키로서 자연스럽고 간결하게 답하세요 (기본 언어는 한국어이며, 사용자가 일본어나 영어로 말하면 해당 언어로 답하세요).")
     return "\n\n".join(lines)
 
 
@@ -136,20 +144,24 @@ def _is_gemini_model_slug(slug: str) -> bool:
 def _find_gemini_cli_command() -> list[str]:
     """Locate the official Gemini CLI executable without reading credentials."""
     candidates = []
-    which_cmd = shutil.which("gemini.cmd") or shutil.which("gemini")
-    if which_cmd:
-        candidates.append(Path(which_cmd))
     appdata = os.environ.get("APPDATA")
     if appdata:
         candidates.append(Path(appdata) / "npm" / "gemini.cmd")
+    which_cmd = shutil.which("gemini.cmd") or shutil.which("gemini")
+    if which_cmd:
+        candidates.append(Path(which_cmd))
     for candidate in candidates:
         if candidate.is_file():
             bundle_js = candidate.parent / "node_modules" / "@google" / "gemini-cli" / "bundle" / "gemini.js"
             node_exe = candidate.parent / "node.exe"
             if not node_exe.is_file():
-                which_node = shutil.which("node.exe") or shutil.which("node")
-                if which_node:
-                    node_exe = Path(which_node)
+                prog_node = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / "node.exe"
+                if prog_node.is_file():
+                    node_exe = prog_node
+                else:
+                    which_node = shutil.which("node.exe") or shutil.which("node")
+                    if which_node:
+                        node_exe = Path(which_node)
             if bundle_js.is_file() and node_exe.is_file():
                 return [str(node_exe), str(bundle_js)]
             return [str(candidate)]
@@ -159,12 +171,12 @@ def _find_gemini_cli_command() -> list[str]:
 def _find_antigravity_cli_command() -> list[str]:
     """Locate the official Antigravity CLI (agy) executable."""
     candidates = []
-    which_agy = shutil.which("agy.exe") or shutil.which("agy")
-    if which_agy:
-        candidates.append(Path(which_agy))
     localappdata = os.environ.get("LOCALAPPDATA")
     if localappdata:
         candidates.append(Path(localappdata) / "agy" / "bin" / "agy.exe")
+    which_agy = shutil.which("agy.exe") or shutil.which("agy")
+    if which_agy:
+        candidates.append(Path(which_agy))
     for candidate in candidates:
         if candidate.is_file():
             return [str(candidate)]
@@ -214,31 +226,59 @@ class GeminiCLIClient:
     def sign_in(self, cancel_event=None):
         _check(cancel_event)
         base_cmd = _find_gemini_cli_command()
-        try:
-            completed = subprocess.run(
-                [*base_cmd, "--version"],
-                cwd=str(self.workspace_dir),
-                env=_sanitized_env(),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=20,
-                creationflags=_creation_flags(),
-            )
-        except subprocess.TimeoutExpired:
-            raise ChatGPTError("Gemini CLI 확인 시간이 초과되었습니다.") from None
-        except OSError:
-            raise ChatGPTError("Gemini CLI를 실행하지 못했습니다.") from None
-        _check(cancel_event)
-        version = (completed.stdout or "").strip().splitlines()
-        ver_str = version[-1].strip() if version else ""
-        if completed.returncode != 0 or not ver_str:
-            raise ChatGPTError("Gemini CLI 상태를 확인하지 못했습니다. 터미널에서 gemini 로그인을 확인하세요.")
+        ver_str = self._read_installed_version(base_cmd)
+        if not ver_str:
+            try:
+                completed = subprocess.run(
+                    [*base_cmd, "--version"],
+                    cwd=str(self.workspace_dir),
+                    env=_sanitized_env(),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=20,
+                    creationflags=_creation_flags(),
+                )
+            except subprocess.TimeoutExpired:
+                raise ChatGPTError("Gemini CLI 확인 시간이 초과되었습니다.") from None
+            except OSError:
+                raise ChatGPTError("Gemini CLI를 실행하지 못했습니다.") from None
+            _check(cancel_event)
+            version = (completed.stdout or "").strip().splitlines()
+            ver_str = version[-1].strip() if version else ""
+            if completed.returncode != 0 or not ver_str:
+                raise ChatGPTError("Gemini CLI 상태를 확인하지 못했습니다. 터미널에서 gemini 로그인을 확인하세요.")
         with self._lock:
             self._connected = True
             self._label = f"로컬 Gemini CLI v{ver_str}"
         return self.session_info()
+
+    @staticmethod
+    def _read_installed_version(base_cmd: list[str]) -> str:
+        try:
+            script = Path(base_cmd[-1])
+            if script.is_file():
+                pkg_json = script.resolve().parents[1] / "package.json"
+                if pkg_json.is_file():
+                    data = json.loads(pkg_json.read_text(encoding="utf-8"))
+                    ver = str(data.get("version", "")).strip()
+                    if ver:
+                        return ver
+        except Exception:
+            pass
+        return ""
+
+    def try_fast_connect(self) -> bool:
+        try:
+            base_cmd = _find_gemini_cli_command()
+        except ChatGPTError:
+            return False
+        ver_str = self._read_installed_version(base_cmd) or "local"
+        with self._lock:
+            self._connected = True
+            self._label = f"로컬 Gemini CLI v{ver_str}"
+        return True
 
     def list_models(self, cancel_event=None):
         _check(cancel_event)
@@ -297,7 +337,7 @@ class GeminiCLIClient:
         cmd = [
             *base_cmd,
             "-p",
-            "위 대화 기록의 마지막 사용자 말에 후부키로서 간결하게 답하세요.",
+            "위 대화 기록의 마지막 사용자 말에 후부키로서 간결하게 답하세요 (기본 한국어, 일본어·영어 질문 시 해당 언어로 응답).",
             "-o",
             "stream-json",
             "--approval-mode",
@@ -465,6 +505,19 @@ class AntigravityGeminiClient:
             raise ChatGPTError("사용 가능한 Antigravity Gemini 모델이 없습니다. agy 로그인 상태를 확인하세요.")
         return models
 
+    def try_fast_connect(self) -> bool:
+        try:
+            _find_antigravity_cli_command()
+        except ChatGPTError:
+            return False
+        models = [{"slug": slug, "display_name": name} for slug, name in ANTIGRAVITY_DEFAULT_GEMINI_MODELS]
+        with self._lock:
+            self._connected = True
+            if not self._cached_models:
+                self._cached_models = models
+            self._label = f"로컬 Antigravity (Gemini {len(self._cached_models)}개 모델)"
+        return True
+
     def sign_in(self, cancel_event=None):
         models = self._fetch_gemini_models(cancel_event)
         with self._lock:
@@ -473,14 +526,17 @@ class AntigravityGeminiClient:
             self._label = f"로컬 Antigravity (Gemini {len(models)}개 모델)"
         return self.session_info()
 
-    def list_models(self, cancel_event=None):
+    def list_models(self, cancel_event=None, *, force_refresh: bool = False):
         _check(cancel_event)
         with self._lock:
             if not self._connected:
                 raise ChatGPTError("먼저 로컬 Antigravity에 연결하세요.")
+            if not force_refresh and self._cached_models:
+                return list(self._cached_models)
         models = self._fetch_gemini_models(cancel_event)
         with self._lock:
             self._cached_models = models
+            self._label = f"로컬 Antigravity (Gemini {len(models)}개 모델)"
         return models
 
     def stream_reply(self, messages, model, on_delta, cancel_event=None, *, reasoning_effort=None):

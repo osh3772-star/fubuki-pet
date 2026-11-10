@@ -21,7 +21,6 @@ import uuid
 import webbrowser
 from contextlib import contextmanager
 
-import jwt
 import requests
 
 ISSUER = "https://auth.openai.com"
@@ -32,7 +31,9 @@ JWKS = ISSUER + "/.well-known/jwks.json"
 RESOURCE = "https://api.openai.com/v1"
 SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 DIRECT = "chatgpt.tokens.use.direct"
-PERSONA = ("한국어로 친근한 데스크톱 반려 친구처럼 답하세요. 보통 1~3문장으로 간결하게 답하세요. "
+PERSONA = ("기본 언어는 한국어(한글)로 친근한 데스크톱 반려 친구처럼 답하세요. "
+           "사용자가 일본어나 영어로 말하면 해당 언어(한국어·일본어·영어)에 맞춰 자연스럽게 답하세요. "
+           "보통 1~3문장으로 간결하게 답하세요. "
            "실제 인물이나 공식 캐릭터라고 주장하지 마세요. 도구 실행이나 컴퓨터 작업을 수행했다고 주장하지 마세요.")
 # Responses API enum, not a promise that a particular account/model supports it.
 # https://developers.openai.com/api/docs/guides/reasoning
@@ -217,6 +218,7 @@ class ChatGPTClient:
                 raise ChatGPTError("OpenAI 응답 형식이 올바르지 않습니다.") from None
 
     def _verify_identity(self, token, client_id, nonce, cancel):
+        import jwt
         keys = self._json("GET", JWKS, cancel)
         try:
             header = jwt.get_unverified_header(token)

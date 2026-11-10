@@ -10,11 +10,13 @@ import time
 import unittest
 from unittest.mock import patch
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QInputMethodEvent
 from PySide6.QtWidgets import QApplication
 
 from windows_pet.chat_bubble import BubbleChat
 from windows_pet.chat_window import ChatWindow
-from windows_pet.chatgpt_client import ChatGPTError, Cancelled, REASONING_REJECTED
+from windows_pet.chatgpt_client import ChatGPTError, Cancelled, PERSONA, REASONING_REJECTED
 from windows_pet.local_cli_clients import (
     AntigravityGeminiClient,
     GeminiCLIClient,
@@ -22,6 +24,7 @@ from windows_pet.local_cli_clients import (
     STRIPPED_API_KEY_VARS,
     _is_gemini_model_slug,
     _sanitized_env,
+    _validate_and_format_messages,
 )
 from test_chat_ui import FakeClient
 
@@ -295,6 +298,55 @@ class MultiProviderUITests(unittest.TestCase):
             self.window.send()
             self.wait()
         self.assertIn("Antigravity Gemini", self.window.transcript.toPlainText())
+
+    def test_multilingual_persona_and_prompt_support_ko_ja_en(self):
+        self.assertIn("한국어", PERSONA)
+        self.assertIn("일본어", PERSONA)
+        self.assertIn("영어", PERSONA)
+        formatted = _validate_and_format_messages(
+            [
+                {"role": "user", "content": "안녕하세요 / こんにちは / Hello"},
+            ]
+        )
+        self.assertIn("한국어", formatted)
+        self.assertIn("일본어", formatted)
+        self.assertIn("영어", formatted)
+
+    def test_instant_focus_ime_and_idle_follow_anchor_no_repaint_lag(self):
+        self.window.open_bubble()
+        self.app.processEvents()
+        self.assertFalse(self.window.bubble.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating))
+        self.assertTrue(self.window.input.testAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled))
+        self.assertTrue(self.window.input.isEnabled())
+
+        # Input stays enabled even while a background worker is running
+        self.chatgpt.slow = True
+        self.window.connect_account()
+        self.wait()
+        self.window.input.setPlainText("안녕")
+        self.window.send()
+        self.assertTrue(self.window.input.isEnabled())
+        self.window.stop()
+        self.wait()
+        self.window.input.clear()
+
+        # Korean, Japanese, and English IME preedit & commit work without lag or redundant repaints
+        for sample in ("안녕하세요", "こんにちは", "Hello Fubuki"):
+            preedit = QInputMethodEvent(sample[:1], [])
+            QApplication.sendEvent(self.window.input, preedit)
+            self.assertTrue(self.window.input.composing)
+            commit = QInputMethodEvent()
+            commit.setCommitString(sample + " ")
+            QApplication.sendEvent(self.window.input, commit)
+            self.assertFalse(self.window.input.composing)
+        self.assertEqual(self.window.input.toPlainText(), "안녕하세요 こんにちは Hello Fubuki ")
+
+        # Verify follow_anchor() skips redundant bubble.update() calls when geometry is unchanged
+        self.window.follow_anchor(force=True)
+        with patch.object(self.window.bubble, "update") as update_mock:
+            for _ in range(10):
+                self.window.follow_anchor()
+            update_mock.assert_not_called()
 
 
 if __name__ == "__main__":

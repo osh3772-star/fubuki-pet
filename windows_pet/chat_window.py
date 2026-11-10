@@ -68,7 +68,22 @@ class ChatWindow(QWidget):
         self.client = self.providers[self.current_provider]
         self._provider_models = {k: [] for k in self.providers}
         self._provider_selected_model = {k: None for k in self.providers}
+        self._transcript_rev = 0
         self.mock = mock
+        if not mock and client is None and providers is None:
+            for code in ('gemini', 'antigravity_gemini'):
+                fast_fn = getattr(self.providers.get(code), 'try_fast_connect', None)
+                if callable(fast_fn) and fast_fn():
+                    try:
+                        self._provider_models[code] = list(self.providers[code].list_models())
+                    except Exception:
+                        pass
+            if not self.providers['chatgpt'].session_info().get('connected'):
+                for fallback_code in ('gemini', 'antigravity_gemini'):
+                    if self.providers[fallback_code].session_info().get('connected'):
+                        self.current_provider = fallback_code
+                        self.client = self.providers[fallback_code]
+                        break
         self.worker = None
         self.history = []
         self.current_text = ''
@@ -145,6 +160,17 @@ class ChatWindow(QWidget):
         self.send_button.clicked.connect(self.send)
         self.stop_button.clicked.connect(self.stop)
         self.new_button.clicked.connect(self.new_chat)
+        if self.current_provider != 'chatgpt':
+            idx = self.provider_selector.findData(self.current_provider)
+            if idx >= 0:
+                self.provider_selector.blockSignals(True)
+                self.provider_selector.setCurrentIndex(idx)
+                self.provider_selector.blockSignals(False)
+            self.connect_button.setText(PROVIDER_CONNECT_LABELS.get(self.current_provider, '연결'))
+            self.cli_login_button.setVisible(self.current_provider in ('gemini', 'antigravity_gemini'))
+            self.notice.setText(PROVIDER_NOTICES.get(self.current_provider, PROVIDER_NOTICES['chatgpt']))
+            self._restore_provider_models(self.current_provider)
+            self._effort_model = self.models.currentData()
         self.refresh_controls()
     def select_provider(self, provider_code: str):
         if self.worker is not None or provider_code not in self.providers:
@@ -204,7 +230,7 @@ class ChatWindow(QWidget):
         self.models.setEnabled(not busy)
         self.reasoning_effort.setEnabled(connected and self.models.count() > 0 and not busy)
         self.send_button.setEnabled(connected and self.models.count() > 0 and not busy)
-        self.input.setEnabled(not busy)
+        self.input.setEnabled(True)
         self.new_button.setEnabled(not busy)
         self.stop_button.setEnabled(busy)
         if not busy:
@@ -294,6 +320,7 @@ class ChatWindow(QWidget):
         if footer: lines.append(footer)
         self.transcript.setPlainText('\n\n'.join(lines))
         self.transcript.verticalScrollBar().setValue(self.transcript.verticalScrollBar().maximum())
+        self._transcript_rev = getattr(self, '_transcript_rev', 0) + 1
     def on_result(self, value):
         if self.operation == 'models':
             self._provider_models[self.current_provider] = list(value)

@@ -301,6 +301,7 @@ def main()->int:
             self.trace.setText('최근 전환: '+' → '.join(x['to'] for x in list(engine.history)[-8:]))
     overlay=Overlay()
     if args.chat or args.chat_mock:overlay.open_chat()
+    else:QTimer.singleShot(0,overlay._ensure_chat)
     if args.debug:overlay.open_debug()
     app.aboutToQuit.connect(overlay.save)
     return app.exec()

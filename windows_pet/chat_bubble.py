@@ -4,14 +4,21 @@ from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QPainter, QP
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QPlainTextEdit, QLabel, QComboBox
 from .chat_window import ChatWindow
 
+_LOADED_FONT_FAMILIES = None
+
 def load_chat_fonts():
     """App-private OFL fonts; never installs fonts or changes Windows settings."""
+    global _LOADED_FONT_FAMILIES
+    if _LOADED_FONT_FAMILIES:
+        return list(_LOADED_FONT_FAMILIES)
     from pathlib import Path
     root=Path(__file__).resolve().parents[1]/'assets'/'fonts'
     loaded=[]
     for name in ('NotoSansKR.ttf','NotoSansJP.ttf'):
         font_id=QFontDatabase.addApplicationFont(str(root/name))
         if font_id>=0:loaded.extend(QFontDatabase.applicationFontFamilies(font_id))
+    if loaded:
+        _LOADED_FONT_FAMILIES=tuple(loaded)
     return loaded
 
 # Original snow/sky palette. No artwork or font from reference games is bundled.
@@ -62,6 +69,8 @@ class BubbleInput(QPlainTextEdit):
     def __init__(self):
         super().__init__()
         self.composing = False
+        self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.document().setDocumentMargin(0)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setAccessibleName('Message to Fubuki')
@@ -128,8 +137,8 @@ class BubbleChat(ChatWindow):
             self.bubble.setWindowFlags(Qt.WindowType.Window|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint)
         self.bubble.setWindowTitle('후부키 말풍선')
         self.bubble.setObjectName('fubukiBubble')
-        self.bubble.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.bubble.setStyleSheet(SKY_THEME)
+        self._last_follow_state=None
         box=QVBoxLayout(self.bubble);box.setContentsMargins(22,10,22,10);box.setSpacing(5)
         head=QHBoxLayout();head.setSpacing(4)
         speaker=QLabel('후부키');speaker.setObjectName('speaker');head.addWidget(speaker)
@@ -139,6 +148,7 @@ class BubbleChat(ChatWindow):
         for label,code in (('ChatGPT','chatgpt'),('Gemini','gemini'),('Antigravity','antigravity_gemini')):
             self.bubble_provider.addItem(label,code)
         self.bubble_provider.setFixedSize(86,22)
+        self._sync_bubble_provider(self.current_provider)
         self.bubble_provider.currentIndexChanged.connect(self._on_bubble_provider_changed)
         self.provider_changed.connect(self._sync_bubble_provider)
         head.addWidget(self.bubble_provider)
@@ -164,6 +174,8 @@ class BubbleChat(ChatWindow):
         self.launch_button.setAccessibleName('Open Fubuki chat')
         self.launch_button.clicked.connect(self.open_bubble)
         self.launch_button.setFixedSize(48,26);self.launch_button.show()
+        self.bubble.ensurePolished();self.input.ensurePolished()
+        _=self.input.fontMetrics().horizontalAdvance('한글 日本語 English')
         self.timer=QTimer(self);self.timer.timeout.connect(self.follow_anchor);self.timer.start(40)
         self.refresh_controls()
     def _on_bubble_provider_changed(self):
@@ -182,11 +194,12 @@ class BubbleChat(ChatWindow):
         if getattr(self,'bubble_provider',None) is not None:
             self.bubble_provider.setEnabled(self.worker is None)
     def open_bubble(self):
-        self.follow_anchor(force=True);self.bubble.show();self.launch_button.hide();self.bubble.raise_()
+        self.bubble.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating,False)
+        self.follow_anchor(force=True);self.launch_button.hide();self.bubble.show();self.follow_anchor(force=True);self.bubble.raise_()
         # Only this explicit user action activates the editor, never streamed replies.
-        self.bubble.activateWindow();self.input.setFocus()
+        self.bubble.activateWindow();self.input.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
     def fold_bubble(self):
-        self.bubble.hide();self.follow_anchor();self.launch_button.show()
+        self.bubble.hide();self.follow_anchor(force=True);self.launch_button.show()
     def open_settings(self):
         self.showNormal();self.raise_();self.activateWindow()
     def follow_anchor(self,force=False):
@@ -195,16 +208,39 @@ class BubbleChat(ChatWindow):
         if not screen:return
         area=screen.availableGeometry()
         head=anchor_head_rect(self.anchor,rect)
-        self.launch_button.setGeometry(place_launcher(head,area,self.launch_button.width(),self.launch_button.height()))
-        self.launch_button.setVisible(not self.bubble.isVisible())
-        self.transcript.document().setTextWidth(max(1,self.transcript.viewport().width()))
+        bubble_visible=self.bubble.isVisible()
+        vp_width=max(1,self.transcript.viewport().width())
+        state_key=(
+            head.x(),head.y(),head.width(),head.height(),
+            area.x(),area.y(),area.width(),area.height(),
+            bubble_visible,
+            vp_width,
+            self.input.height(),
+            getattr(self,'_transcript_rev',0),
+            self.side,
+        )
+        if not force and getattr(self,'_last_follow_state',None)==state_key:
+            return
+        self._last_follow_state=state_key
+        launcher_geom=place_launcher(head,area,self.launch_button.width(),self.launch_button.height())
+        if self.launch_button.geometry()!=launcher_geom:
+            self.launch_button.setGeometry(launcher_geom)
+        if self.launch_button.isVisible()==bubble_visible:
+            self.launch_button.setVisible(not bubble_visible)
+        if int(self.transcript.document().textWidth())!=vp_width:
+            self.transcript.document().setTextWidth(vp_width)
         reply_height=max(56,min(96,int(self.transcript.document().size().height())+12))
-        self.transcript.setFixedHeight(reply_height)
+        if self.transcript.height()!=reply_height:
+            self.transcript.setFixedHeight(reply_height)
         height=self.bubble.sizeHint().height()
         bubble_anchor=QRect(head.x(),head.y()-40,head.width(),head.height())
-        geometry,self.side=place_bubble(bubble_anchor,area,286,height,self.side)
-        self.bubble.side=self.side;self.bubble.update()
-        self.bubble.setGeometry(geometry)
+        geometry,new_side=place_bubble(bubble_anchor,area,286,height,self.side)
+        side_changed=(new_side!=self.side or self.bubble.side!=new_side)
+        self.side=new_side;self.bubble.side=new_side
+        if self.bubble.geometry()!=geometry:
+            self.bubble.setGeometry(geometry)
+        if side_changed or force:
+            self.bubble.update()
     def shutdown(self):
         if not super().shutdown():return False
         self.timer.stop();self.bubble.hide();self.launch_button.hide();return True
