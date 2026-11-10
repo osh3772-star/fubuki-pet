@@ -1,6 +1,6 @@
 """Character-anchored chat. The existing ChatWindow owns all auth and workers."""
-from PySide6.QtCore import Qt, QTimer, Signal, QRect, QEvent
-from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QPainter, QPainterPath, QColor, QPen, QFontDatabase
+from PySide6.QtCore import Qt, QTimer, Signal, QRect, QEvent, QPoint
+from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QPainter, QPainterPath, QColor, QPen, QFontDatabase, QTextCursor, QTextBlockFormat
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QPlainTextEdit, QLabel, QComboBox
 from .chat_window import ChatWindow
 
@@ -27,12 +27,12 @@ QWidget { font-family: 'Noto Sans KR', 'Noto Sans JP', 'Malgun Gothic', 'Yu Goth
 QWidget#fubukiBubble, QWidget#fubukiSettings, QLabel { background: transparent; }
 QWidget#settingsCard { background: #EDF8FF; border: 1px solid #A6D4EC; border-radius: 14px; }
 QLabel#speaker { color: #183E59; font-size: 14px; font-weight: 600; }
-QLabel#status { color: #48677B; font-size: 11px; padding-bottom: 3px; }
+QLabel#status { color: #48677B; font-size: 11px; padding-bottom: 2px; }
 QLabel#inputLabel { color: #42687D; font-size: 11px; font-weight: 600; }
 QLabel#captionNote { color: #48677B; font-size: 11px; background: #F1F9FE; border: 1px solid #D5EAF7; border-radius: 10px; padding: 6px 8px; }
-QTextEdit { background: transparent; border: none; border-radius: 10px; padding: 4px; color: #203E55; font-size: 14px; selection-background-color: #C5E9FF; }
-QPlainTextEdit { background: #EDF8FF; border: 1px solid #A6D4EC; border-radius: 14px; padding: 4px; color: #203E55; font-size: 14px; selection-background-color: #B0DDF5; }
-QPlainTextEdit:focus { border: 2px solid #3685AE; }
+QTextEdit { background: #FFFFFF; border: 1.5px solid #C5E3F6; border-radius: 14px; padding: 6px 8px; color: #163247; font-size: 15px; font-weight: 500; selection-background-color: #C5E9FF; }
+QPlainTextEdit { background: #EDF8FF; border: 1px solid #A6D4EC; border-radius: 14px; padding: 5px 7px; color: #163247; font-size: 14px; selection-background-color: #B0DDF5; }
+QPlainTextEdit:focus { border: 2px solid #3685AE; background: #F7FCFF; }
 QComboBox { background: #EAF5FC; border: 1px solid #CAE2F0; border-radius: 8px; padding: 2px 6px; color: #203E55; font-size: 11px; min-height: 20px; }
 QComboBox:hover { background: #D6EEFC; border-color: #76B6D7; }
 QComboBox:disabled { color: #758692; background: #EDF1F4; border-color: #DCE4E9; }
@@ -57,12 +57,27 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 """
 
 class SnowBubble(QWidget):
-    def __init__(self):
+    def __init__(self, owner=None):
         super().__init__(None,Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint)
         self.side='right'
+        self.owner=owner
         self._path_cache_key=None
         self._cached_path=None
+        self._drag_start_global=None
+        self._drag_start_pos=None
+        self._resize_edges=''
+        self._resize_start_global=None
+        self._resize_start_geom=None
+        self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    def _hit_resize_edges(self,pos:QPoint)->str:
+        if self.owner is None:return ''
+        w,h=self.width(),self.height()
+        edges=''
+        if pos.y()>=h-14:edges+='b'
+        if pos.x()>=w-16 and pos.y()>36:edges+='r'
+        elif pos.x()<=16 and pos.y()>36:edges+='l'
+        return edges
     def paintEvent(self,event):
         w,h,side=self.width(),self.height(),self.side
         key=(w,h,side)
@@ -78,6 +93,64 @@ class SnowBubble(QWidget):
             self._path_cache_key=key
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(QColor('#AFD7EC'),1.5));p.setBrush(QColor('#F8FCFF'));p.drawPath(self._cached_path)
+        if self.owner is not None:
+            # Subtle bottom-right resize grip lines so user knows bubble is resizable
+            p.setPen(QPen(QColor('#8AC0DE'),1.4))
+            p.drawLine(w-24,h-10,w-17,h-17)
+            p.drawLine(w-20,h-10,w-17,h-13)
+    def mousePressEvent(self,event):
+        if self.owner is not None and event.button()==Qt.MouseButton.LeftButton:
+            pos=event.position().toPoint() if hasattr(event,'position') else event.pos()
+            gpos=event.globalPosition().toPoint() if hasattr(event,'globalPosition') else event.globalPos()
+            edges=self._hit_resize_edges(pos)
+            if edges:
+                self._resize_edges=edges
+                self._resize_start_global=gpos
+                self._resize_start_geom=QRect(self.geometry())
+                event.accept();return
+            if pos.y()<=40:
+                self._drag_start_global=gpos
+                self._drag_start_pos=self.frameGeometry().topLeft()
+                event.accept();return
+        super().mousePressEvent(event)
+    def mouseDoubleClickEvent(self,event):
+        if self.owner is not None and event.button()==Qt.MouseButton.LeftButton:
+            pos=event.position().toPoint() if hasattr(event,'position') else event.pos()
+            if pos.y()<=40:
+                self.owner.reset_window_adjustments()
+                event.accept();return
+        super().mouseDoubleClickEvent(event)
+    def mouseMoveEvent(self,event):
+        if self.owner is not None:
+            pos=event.position().toPoint() if hasattr(event,'position') else event.pos()
+            gpos=event.globalPosition().toPoint() if hasattr(event,'globalPosition') else event.globalPos()
+            if self._resize_edges and (event.buttons()&Qt.MouseButton.LeftButton):
+                dx=gpos.x()-self._resize_start_global.x()
+                dy=gpos.y()-self._resize_start_global.y()
+                g=self._resize_start_geom
+                new_w=g.width()+(dx if 'r' in self._resize_edges else (-dx if 'l' in self._resize_edges else 0))
+                new_h=g.height()+(dy if 'b' in self._resize_edges else 0)
+                self.owner.apply_user_resize(new_w if ('r' in self._resize_edges or 'l' in self._resize_edges) else None,
+                                             new_h if 'b' in self._resize_edges else None)
+                event.accept();return
+            if self._drag_start_global is not None and (event.buttons()&Qt.MouseButton.LeftButton):
+                target=self._drag_start_pos+(gpos-self._drag_start_global)
+                self.owner.apply_user_move(target)
+                event.accept();return
+            edges=self._hit_resize_edges(pos)
+            if edges in ('rb','br'):self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            elif edges in ('lb','bl'):self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+            elif edges in ('r','l'):self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif edges=='b':self.setCursor(Qt.CursorShape.SizeVerCursor)
+            else:self.unsetCursor()
+        super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self,event):
+        self._drag_start_global=None
+        self._drag_start_pos=None
+        self._resize_edges=''
+        self._resize_start_global=None
+        self._resize_start_geom=None
+        super().mouseReleaseEvent(event)
 
 
 class BubbleInput(QPlainTextEdit):
@@ -156,6 +229,12 @@ class BubbleChat(ChatWindow):
         self.bubble_provider=None
         self.expanded=False
         self.expand_button=None
+        self.font_down_button=None
+        self.font_up_button=None
+        self.chat_font_px=15
+        self.custom_width=None
+        self.custom_height=None
+        self.custom_offset=None
         super().__init__(data_dir,mock,client,providers=providers)
         self.anchor=anchor;self.side='right';self._drag_offset=None
         self.setWindowTitle('후부키 계정 · 모델 설정')
@@ -166,7 +245,7 @@ class BubbleChat(ChatWindow):
         if hasattr(self,'standalone_chat_box'):
             self.standalone_chat_box.hide()
         QShortcut(QKeySequence('Escape'),self,activated=self.hide)
-        self.bubble=SnowBubble()
+        self.bubble=SnowBubble(owner=self)
         if mock:
             # Keep offline validation discoverable by native accessibility tools.
             self.bubble.setWindowFlags(Qt.WindowType.Window|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint)
@@ -174,24 +253,38 @@ class BubbleChat(ChatWindow):
         self.bubble.setObjectName('fubukiBubble')
         self.bubble.setStyleSheet(SKY_THEME)
         self._last_follow_state=None
-        box=QVBoxLayout(self.bubble);box.setContentsMargins(16,10,16,10);box.setSpacing(5)
-        head=QHBoxLayout();head.setSpacing(2)
+        box=QVBoxLayout(self.bubble);box.setContentsMargins(16,10,16,12);box.setSpacing(6)
+        head=QHBoxLayout();head.setSpacing(3)
         speaker=QLabel('후부키');speaker.setObjectName('speaker');head.addWidget(speaker)
         self.bubble_provider=QComboBox()
         self.bubble_provider.setAccessibleName('Bubble provider selector')
         self.bubble_provider.setToolTip('대화 공급자 선택 (ChatGPT · Gemini · Antigravity Gemini)')
         for label,code in (('ChatGPT','chatgpt'),('Gemini','gemini'),('Antigravity','antigravity_gemini')):
             self.bubble_provider.addItem(label,code)
-        self.bubble_provider.setFixedSize(64,22)
+        self.bubble_provider.setFixedSize(72,22)
         self._sync_bubble_provider(self.current_provider)
         self.bubble_provider.currentIndexChanged.connect(self._on_bubble_provider_changed)
         self.provider_changed.connect(self._sync_bubble_provider)
         head.addWidget(self.bubble_provider)
         head.addStretch()
+        self.font_down_button=QPushButton('가−')
+        self.font_down_button.setAccessibleName('Decrease chat font size')
+        self.font_down_button.setToolTip('글자 크기 작게 (창 상단 더블클릭 시 크기·위치 초기화)')
+        self.font_down_button.setFixedSize(28,22)
+        self.font_down_button.setStyleSheet('padding: 1px 2px; font-size: 11px;')
+        self.font_down_button.clicked.connect(lambda:self.adjust_font_size(-1))
+        head.addWidget(self.font_down_button)
+        self.font_up_button=QPushButton('가+')
+        self.font_up_button.setAccessibleName('Increase chat font size')
+        self.font_up_button.setToolTip('글자 크기 크게 (우측·하단 모서리 드래그로 창 크기 조절 가능)')
+        self.font_up_button.setFixedSize(28,22)
+        self.font_up_button.setStyleSheet('padding: 1px 2px; font-size: 11px;')
+        self.font_up_button.clicked.connect(lambda:self.adjust_font_size(1))
+        head.addWidget(self.font_up_button)
         self.expand_button=QPushButton('펼치기')
         self.expand_button.setAccessibleName('Toggle full conversation')
-        self.expand_button.setToolTip('전체 대화 내용 펼치기 / 접기')
-        self.expand_button.setFixedSize(40,22)
+        self.expand_button.setToolTip('전체 답변 및 큰 창으로 펼치기 / 접기')
+        self.expand_button.setFixedSize(42,22)
         self.expand_button.setStyleSheet('padding: 1px 2px; font-size: 11px;')
         self.expand_button.clicked.connect(self.toggle_expand)
         head.addWidget(self.expand_button)
@@ -201,15 +294,16 @@ class BubbleChat(ChatWindow):
         head.addWidget(self.new_button)
         settings=QPushButton('⋯');settings.setFixedSize(22,22);settings.setAccessibleName('Chat settings');settings.clicked.connect(self.open_settings);head.addWidget(settings)
         close=QPushButton('−');close.setFixedSize(22,22);close.setAccessibleName('Fold Fubuki chat');close.clicked.connect(self.fold_bubble);head.addWidget(close);box.addLayout(head)
-        self.status.setObjectName('status');self.status.setMaximumHeight(30);box.addWidget(self.status)
+        self.status.setObjectName('status');self.status.setWordWrap(False);self.status.setMinimumWidth(40);self.status.setFixedHeight(20);box.addWidget(self.status)
         box.addWidget(self.transcript)
         self.transcript.setAccessibleName('Fubuki conversation')
-        self.transcript.setMinimumHeight(56);self.transcript.setMaximumHeight(96)
+        self.transcript.document().setDocumentMargin(6)
+        self.transcript.setMinimumHeight(68);self.transcript.setMaximumHeight(132)
         self.transcript.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.input.hide();self.input.deleteLater();self.input=BubbleInput();self.input.submit.connect(self.send)
-        self.send_button.setObjectName('send');self.send_button.setText('↑');self.send_button.setAccessibleName('Send message');self.send_button.setFixedSize(28,30)
-        self.stop_button.setText('■');self.stop_button.setAccessibleName('Stop response');self.stop_button.setFixedSize(26,30)
-        row=QHBoxLayout();row.setSpacing(4)
+        self.send_button.setObjectName('send');self.send_button.setText('↑');self.send_button.setAccessibleName('Send message');self.send_button.setFixedSize(30,32)
+        self.stop_button.setText('■');self.stop_button.setAccessibleName('Stop response');self.stop_button.setFixedSize(28,32)
+        row=QHBoxLayout();row.setSpacing(5)
         row.addWidget(self.input,1);row.addWidget(self.stop_button);row.addWidget(self.send_button);box.addLayout(row)
         QShortcut(QKeySequence('Escape'),self.bubble,activated=self.fold_bubble)
         self.launch_button=QPushButton('•••',None)
@@ -219,10 +313,50 @@ class BubbleChat(ChatWindow):
         self.launch_button.setAccessibleName('Open Fubuki chat')
         self.launch_button.clicked.connect(self.open_bubble)
         self.launch_button.setFixedSize(48,26);self.launch_button.show()
-        self.bubble.ensurePolished();self.input.ensurePolished()
+        self.bubble.ensurePolished();self.transcript.ensurePolished();self.input.ensurePolished()
+        self._apply_font_size()
         _=self.input.fontMetrics().horizontalAdvance('한글 日本語 English')
         self.timer=QTimer(self);self.timer.timeout.connect(self.follow_anchor);self.timer.start(40)
         self.refresh_controls()
+    def _apply_font_size(self):
+        px=max(12,min(20,int(getattr(self,'chat_font_px',15))))
+        self.chat_font_px=px
+        self.transcript.setStyleSheet(f'font-size: {px}px; font-weight: 500;')
+        font=self.transcript.font();font.setPixelSize(px)
+        self.transcript.document().setDefaultFont(font)
+        input_px=max(13,min(17,px-1))
+        self.input.setStyleSheet(f'font-size: {input_px}px;')
+        self.input.fit_height()
+        self._apply_transcript_line_spacing()
+    def _apply_transcript_line_spacing(self):
+        doc=self.transcript.document()
+        cursor=QTextCursor(doc)
+        cursor.select(QTextCursor.SelectionType.Document)
+        fmt=QTextBlockFormat()
+        fmt.setLineHeight(132,QTextBlockFormat.LineHeightTypes.ProportionalHeight.value if hasattr(QTextBlockFormat.LineHeightTypes.ProportionalHeight,'value') else 1)
+        fmt.setBottomMargin(3)
+        cursor.mergeBlockFormat(fmt)
+    def adjust_font_size(self,delta:int):
+        self.chat_font_px=max(12,min(20,int(getattr(self,'chat_font_px',15))+int(delta)))
+        self._apply_font_size()
+        self._transcript_rev=getattr(self,'_transcript_rev',0)+1
+        self.follow_anchor(force=True)
+    def apply_user_resize(self,new_w=None,new_h=None):
+        if new_w is not None:
+            self.custom_width=max(270,min(680,int(new_w)))
+        if new_h is not None:
+            self.custom_height=max(180,min(620,int(new_h)))
+        self.follow_anchor(force=True)
+    def apply_user_move(self,target_pos:QPoint):
+        rect=self.anchor.frameGeometry() if self.anchor else QRect(500,400,160,180)
+        head=anchor_head_rect(self.anchor,rect)
+        self.custom_offset=target_pos-head.topLeft()
+        self.follow_anchor(force=True)
+    def reset_window_adjustments(self):
+        self.custom_width=None
+        self.custom_height=None
+        self.custom_offset=None
+        self.follow_anchor(force=True)
     def _on_bubble_provider_changed(self):
         if self.bubble_provider is not None:
             code=self.bubble_provider.currentData()
@@ -240,6 +374,8 @@ class BubbleChat(ChatWindow):
             self.bubble_provider.setEnabled(self.worker is None)
     def toggle_expand(self):
         self.expanded=not self.expanded
+        self.custom_width=None
+        self.custom_height=None
         if self.expand_button is not None:
             self.expand_button.setText('접기' if self.expanded else '펼치기')
         self.render()
@@ -250,33 +386,37 @@ class BubbleChat(ChatWindow):
             return text
         return text[:limit].rstrip()+'… [펼치기에서 전체 보기]'
     def render(self,footer=''):
-        if getattr(self,'expanded',False):
-            super().render(footer)
-            return
+        is_expanded=bool(getattr(self,'expanded',False))
+        assistant_turns=[m['content'] for m in self.history if m.get('role')=='assistant' and m.get('content')]
         lines=[]
-        if self.pending_user:
-            lines.append('💬 나: '+self.pending_user)
-            if self.current_text:
+        if is_expanded:
+            if assistant_turns:
+                lines.append('\n\n─────────────────\n\n'.join(assistant_turns))
+            if self.pending_user:
                 cursor='▍' if not footer else ''
-                lines.append('후부키: '+self._compact_reply_text(self.current_text)+cursor)
-            else:
-                lines.append('후부키: '+('…' if not footer else ''))
-        elif self.history:
-            last=self.history[-1]
-            if last['role']=='assistant':
-                if len(self.history)>=2 and self.history[-2]['role']=='user':
-                    lines.append('💬 나: '+self.history[-2]['content'])
-                lines.append('후부키: '+self._compact_reply_text(last['content']))
-            else:
-                lines.append('💬 나: '+last['content'])
+                live=(self.current_text+cursor) if self.current_text else ('…' if not footer else '')
+                if live:
+                    lines.append(live)
+        else:
+            if self.pending_user:
+                if self.current_text:
+                    cursor='▍' if not footer else ''
+                    lines.append(self._compact_reply_text(self.current_text)+cursor)
+                elif not footer:
+                    lines.append('…')
+            elif assistant_turns:
+                lines.append(self._compact_reply_text(assistant_turns[-1]))
         if footer:
             lines.append(footer)
         text='\n'.join(lines)
         if getattr(self,'_last_rendered_text',None)!=text:
             self._last_rendered_text=text
             self.transcript.setPlainText(text)
-            # Keep the user's own utterance visible at the top of the compact speech bubble.
-            self.transcript.verticalScrollBar().setValue(0)
+            self._apply_transcript_line_spacing()
+            if is_expanded and self.pending_user:
+                bar=self.transcript.verticalScrollBar();bar.setValue(bar.maximum())
+            else:
+                self.transcript.verticalScrollBar().setValue(0)
             self._transcript_rev=getattr(self,'_transcript_rev',0)+1
     def open_bubble(self):
         self.bubble.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating,False)
@@ -331,16 +471,25 @@ class BubbleChat(ChatWindow):
             self._last_anchor_rect=QRect(rect)
             self._last_head_rect=QRect(head)
         is_expanded=bool(getattr(self,'expanded',False))
-        vp_width=max(1,self.transcript.viewport().width())
+        target_width=self.custom_width if self.custom_width is not None else (440 if is_expanded else 350)
+        est_vp_width=max(120,target_width-52)
+        if int(self.transcript.document().textWidth())!=est_vp_width:
+            self.transcript.document().setTextWidth(est_vp_width)
+        doc_h=int(self.transcript.document().size().height())
         state_key=(
             head.x(),head.y(),head.width(),head.height(),
             area.x(),area.y(),area.width(),area.height(),
             bubble_visible,
             is_expanded,
-            vp_width,
+            est_vp_width,
+            doc_h,
             self.input.height(),
             getattr(self,'_transcript_rev',0),
             self.side,
+            self.custom_width,
+            self.custom_height,
+            (self.custom_offset.x(),self.custom_offset.y()) if self.custom_offset is not None else None,
+            getattr(self,'chat_font_px',15),
         )
         if not force and getattr(self,'_last_follow_state',None)==state_key:
             return
@@ -350,24 +499,35 @@ class BubbleChat(ChatWindow):
             self.launch_button.setGeometry(launcher_geom)
         if self.launch_button.isVisible()==bubble_visible:
             self.launch_button.setVisible(not bubble_visible)
-        if int(self.transcript.document().textWidth())!=vp_width:
-            self.transcript.document().setTextWidth(vp_width)
-        min_h,max_h=(140,240) if is_expanded else (56,96)
-        if self.transcript.minimumHeight()!=min_h or self.transcript.maximumHeight()!=max_h:
-            self.transcript.setMinimumHeight(min_h);self.transcript.setMaximumHeight(max_h)
-        reply_height=max(min_h,min(max_h,int(self.transcript.document().size().height())+12))
-        if self.transcript.height()!=reply_height:
+        if self.custom_height is not None:
+            overhead=max(120,self.input.height()+86)
+            reply_height=max(56,min(480,self.custom_height-overhead))
+            min_h,max_h=56,480
+        else:
+            min_h,max_h=(170,310) if is_expanded else (60,124)
+            reply_height=max(min_h,min(max_h,doc_h+14))
+        if self.transcript.minimumHeight()!=reply_height or self.transcript.maximumHeight()!=reply_height:
             self.transcript.setFixedHeight(reply_height)
-        layout_sig=(reply_height,self.input.height(),is_expanded,self.status.text())
-        if not force and getattr(self,'_last_layout_sig',None)==layout_sig and getattr(self,'_last_bubble_h',0)>0:
+            if self.bubble.layout() is not None:
+                self.bubble.layout().activate()
+        layout_sig=(reply_height,self.input.height(),is_expanded,self.status.text(),self.custom_height)
+        if self.custom_height is not None:
+            height=self.custom_height
+            self._last_layout_sig=layout_sig
+            self._last_bubble_h=height
+        elif not force and getattr(self,'_last_layout_sig',None)==layout_sig and getattr(self,'_last_bubble_h',0)>0:
             height=self._last_bubble_h
         else:
             height=self.bubble.sizeHint().height()
             self._last_layout_sig=layout_sig
             self._last_bubble_h=height
-        target_width=360 if is_expanded else 286
         bubble_anchor=QRect(head.x(),head.y()-40,head.width(),head.height())
         geometry,new_side=place_bubble(bubble_anchor,area,target_width,height,self.side)
+        if self.custom_offset is not None:
+            cx=max(area.left(),min(head.x()+self.custom_offset.x(),area.right()-geometry.width()+1))
+            cy=max(area.top(),min(head.y()+self.custom_offset.y(),area.bottom()-geometry.height()+1))
+            geometry=QRect(cx,cy,geometry.width(),geometry.height())
+            new_side='right' if geometry.center().x()>=head.center().x() else 'left'
         side_changed=(new_side!=self.side or self.bubble.side!=new_side)
         self.side=new_side;self.bubble.side=new_side
         if self.bubble.geometry()!=geometry:

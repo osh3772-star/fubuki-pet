@@ -32,11 +32,11 @@ class CompactBubbleTests(unittest.TestCase):
             for y in (0,700):self.assertTrue(area.contains(place_launcher(QRect(x,y,80,70),area)))
     def test_compact_short_reply_dimensions(self):
         self.w.history=[{'role':'assistant','content':'Short reply.'}];self.w.render();self.w.open_bubble();self.app.processEvents();self.w.follow_anchor()
-        self.assertEqual(self.w.bubble.width(),286);self.assertLessEqual(self.w.bubble.height(),210)
+        self.assertEqual(self.w.bubble.width(),350);self.assertLessEqual(self.w.bubble.height(),240)
         self.assertEqual(self.w.transcript.horizontalScrollBarPolicy(),Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     def test_long_reply_keeps_bounded_bubble(self):
         self.w.history=[{'role':'assistant','content':'A long reply. '*400}];self.w.render();self.w.open_bubble();self.app.processEvents();self.w.follow_anchor()
-        self.assertLessEqual(self.w.transcript.height(),96);self.assertLessEqual(self.w.bubble.height(),250)
+        self.assertLessEqual(self.w.transcript.height(),132);self.assertLessEqual(self.w.bubble.height(),280)
     def test_launcher_follows_anchor_movement(self):
         self.w.fold_bubble();before=self.w.launch_button.pos();self.anchor.move(200,280);self.w.follow_anchor()
         self.assertEqual(self.w.launch_button.pos().x()-before.x(),100)

@@ -372,34 +372,46 @@ class MultiProviderUITests(unittest.TestCase):
         self.window.follow_anchor(force=True)
         self.app.processEvents()
 
-        # In default compact mode: shows current user utterance, hides old turns, and truncates long reply
+        # In default compact mode: hides user utterances ('내 채팅 제외') and shows only Fubuki's concise reply
         compact_text = self.window.transcript.toPlainText()
         self.assertFalse(self.window.expanded)
         self.assertEqual(self.window.expand_button.text(), "펼치기")
-        self.assertIn("💬 나: 방금 내가 한 말", compact_text)
+        self.assertNotIn("방금 내가 한 말", compact_text)
         self.assertNotIn("첫 번째 질문", compact_text)
+        self.assertNotIn("첫 번째 대답", compact_text)
         self.assertIn("[펼치기에서 전체 보기]", compact_text)
         self.assertEqual(self.window.transcript.verticalScrollBar().value(), 0)
-        self.assertEqual(self.window.bubble.width(), 286)
+        self.assertEqual(self.window.bubble.width(), 350)
 
-        # Clicking '펼치기' expands the bubble and shows the entire history and full untruncated text
+        # Clicking '펼치기' expands the bubble and shows Fubuki's full untruncated replies without user text
         self.window.expand_button.click()
         self.app.processEvents()
         expanded_text = self.window.transcript.toPlainText()
         self.assertTrue(self.window.expanded)
         self.assertEqual(self.window.expand_button.text(), "접기")
-        self.assertIn("나: 첫 번째 질문", expanded_text)
-        self.assertIn("후부키: 첫 번째 대답", expanded_text)
-        self.assertIn("나: 방금 내가 한 말", expanded_text)
+        self.assertNotIn("첫 번째 질문", expanded_text)
+        self.assertNotIn("방금 내가 한 말", expanded_text)
+        self.assertIn("첫 번째 대답", expanded_text)
         self.assertIn(long_answer, expanded_text)
-        self.assertEqual(self.window.bubble.width(), 360)
+        self.assertEqual(self.window.bubble.width(), 440)
+
+        # Test window resizing and font size adjustment controls
+        self.window.font_up_button.click()
+        self.assertEqual(self.window.chat_font_px, 16)
+        self.window.font_down_button.click()
+        self.assertEqual(self.window.chat_font_px, 15)
+        self.window.apply_user_resize(480, 320)
+        self.assertEqual(self.window.bubble.width(), 480)
+        self.assertEqual(self.window.bubble.height(), 320)
+        self.window.reset_window_adjustments()
+        self.assertEqual(self.window.bubble.width(), 440)
 
         # Clicking '접기' returns to compact speech-bubble mode
         self.window.expand_button.click()
         self.app.processEvents()
         self.assertFalse(self.window.expanded)
         self.assertEqual(self.window.expand_button.text(), "펼치기")
-        self.assertEqual(self.window.bubble.width(), 286)
+        self.assertEqual(self.window.bubble.width(), 350)
 
     def test_settings_window_matches_snow_bubble_design(self):
         self.window.open_settings()
@@ -426,16 +438,17 @@ class MultiProviderUITests(unittest.TestCase):
         op.run()
         self.assertEqual(emitted_chars, list("안녕 후부키!"))
 
-        # Verify live typing cursor appears during streaming and disappears on completion
+        # Verify live typing cursor appears during streaming and disappears on completion (without user text)
         self.window.pending_user = "인사해줘"
         self.window.current_text = "안녕하"
         self.window.render()
-        self.assertIn("후부키: 안녕하▍", self.window.transcript.toPlainText())
+        self.assertNotIn("인사해줘", self.window.transcript.toPlainText())
+        self.assertIn("안녕하▍", self.window.transcript.toPlainText())
         self.window.on_result_test_complete = None
         self.window.operation = "chat"
         self.window.on_result("안녕하세요!")
         self.assertNotIn("▍", self.window.transcript.toPlainText())
-        self.assertIn("후부키: 안녕하세요!", self.window.transcript.toPlainText())
+        self.assertEqual(self.window.transcript.toPlainText().strip(), "안녕하세요!")
 
     def test_pet_context_bubble_snow_card_design(self):
         from PySide6.QtWidgets import QWidget
