@@ -46,6 +46,8 @@ def restore_saved_position(engine, saved):
 def main()->int:
     ap=argparse.ArgumentParser(description='Fubuki desktop pet')
     ap.add_argument('--candidate-art',action='store_true',help=argparse.SUPPRESS)
+    ap.add_argument('--chat-mock',action='store_true',help='No-network ChatGPT chat test')
+    ap.add_argument('--chat',action='store_true',help='Open subscription chat')
     ap.add_argument('--debug',action='store_true',help='Open the state and animation panel')
     args=ap.parse_args()
     try:
@@ -53,6 +55,8 @@ def main()->int:
         from PySide6.QtGui import QPainter,QPixmap,QRegion,QCursor,QAction,QIcon
         from PySide6.QtWidgets import QApplication,QWidget,QMenu,QSystemTrayIcon,QMessageBox,QVBoxLayout,QLabel,QPushButton,QHBoxLayout,QComboBox
     except ImportError:
+        import traceback
+        traceback.print_exc()
         if sys.platform != 'linux':
             print('PySide6 is not installed. Run setup_windows.cmd first.',file=sys.stderr);return 3
         try:
@@ -97,17 +101,26 @@ def main()->int:
             self.displayed='';self.missing_art=True;self.last_cursor=None;self.last_inbox=0.;self.last_save=0.;self.last_screens=0.
             self.trace_previous=None;self.trace_path=os.environ.get('FUBUKI_FRAME_TRACE')
             self.last_state='';self.timer=QTimer(self);self.timer.timeout.connect(self.tick)
-            self.menu=QMenu(self);self.debug=None
+            self.menu=QMenu(self);self.debug=None;self.chat=None;self.context_bubble=None
+            from .chat_bubble import SKY_THEME
+            self.menu.setStyleSheet(SKY_THEME)
             # Popups take mouse events, including a held button's release.
             self.menu.aboutToShow.connect(engine.cancel_pointer)
             self.tray=QSystemTrayIcon(QIcon(str(default_path)),app);self.tray.setToolTip('Fubuki Pet')
-            self.tray.setContextMenu(self.menu);self.tray.show()
+            self.tray.setContextMenu(self.menu);self.tray.activated.connect(lambda reason:self.open_context_bubble() if reason in (QSystemTrayIcon.ActivationReason.Trigger,QSystemTrayIcon.ActivationReason.Context) else None);self.tray.show()
             self.build_menu();self.render_current();self.move(round(engine.x),round(engine.y));self.show();self.timer.start(30)
         def build_menu(self):
             self.menu.clear()
             title=self.menu.addAction('Fubuki Pet');title.setEnabled(False)
             self.status_action=self.menu.addAction('');self.status_action.setEnabled(False)
-            self.menu.addSeparator();self.menu.addAction('동작 패널 / 상태 보기',self.open_debug)
+            self.menu.addSeparator();self.menu.addAction('ChatGPT 구독 채팅',self.open_chat)
+            providers_menu=self.menu.addMenu('대화 공급자 선택 (ChatGPT · Gemini · Antigravity)')
+            providers_menu.addAction('ChatGPT 구독',lambda:self.open_chat_provider('chatgpt'))
+            providers_menu.addAction('Gemini (로컬 Gemini CLI)',lambda:self.open_chat_provider('gemini'))
+            providers_menu.addAction('Antigravity Gemini (로컬 Antigravity)',lambda:self.open_chat_provider('antigravity_gemini'))
+            providers_menu.addSeparator()
+            providers_menu.addAction('계정 · 모델 설정 열기',self.open_chat_settings)
+            self.menu.addAction('동작 패널 / 상태 보기',self.open_debug)
             actions=self.menu.addMenu('수동 작업 상태 (실제 ChatGPT 상태 아님)')
             for name in ['working','thinking','waiting','success','failed','review','idle']:
                 actions.addAction(name,lambda checked=False,n=name:engine.job_event(n,'manual','debug'))
@@ -116,7 +129,7 @@ def main()->int:
             top=self.menu.addAction('항상 위에 표시');top.setCheckable(True);top.setChecked(settings.always_on_top);top.triggered.connect(self.toggle_top)
             inbox=self.menu.addAction('로컬 앱 / 공식 Codex hook 이벤트 수신');inbox.setCheckable(True);inbox.setChecked(settings.event_inbox_enabled);inbox.triggered.connect(self.toggle_inbox)
             motion=self.menu.addAction('움직임 줄이기');motion.setCheckable(True);motion.setChecked(engine.reduced_motion);motion.triggered.connect(self.toggle_motion)
-            startup=self.menu.addAction('Windows 로그인 시 자동 시작');startup.setCheckable(True);startup.setChecked(self.startup_enabled());startup.setEnabled(sys.platform=='win32');startup.triggered.connect(self.toggle_startup)
+            startup=self.menu.addAction('Windows 로그인 시 자동 시작');startup.setCheckable(True);startup.setChecked(self.startup_enabled());startup.setEnabled(False);startup.triggered.connect(self.toggle_startup)
             self.menu.addAction('화면으로 다시 데려오기',self.bring_back)
             self.menu.addSeparator();self.menu.addAction('종료',self.quit)
         def bring_back(self):
@@ -188,13 +201,15 @@ def main()->int:
                 self.cache[key]=(pm,region)
                 if len(self.cache)>64:self.cache.popitem(last=False)
             else:self.cache.move_to_end(key)
-            self.pixmap,region=self.cache[key];self.current_key=key
-            self.setFixedSize(self.pixmap.size());self.setMask(region);self.update()
+            self.pixmap,region=self.cache[key];self.current_key=key;self.current_region=region
+            if self.size()!=self.pixmap.size():self.setFixedSize(self.pixmap.size())
+            self.setMask(region);self.update()
         def is_opaque(self,gx,gy):
             if self.pixmap is None:return False
             # Hit the frame currently displayed, not an unpainted physics step.
             local=self.mapFromGlobal(QPoint(round(gx),round(gy)))
-            return self.mask().contains(local)
+            reg=getattr(self,'current_region',None)
+            return reg.contains(local) if reg is not None else self.mask().contains(local)
         def tick(self):
             now=time.monotonic();engine.tick(now)
             cur=QCursor.pos();xy=(cur.x(),cur.y())
@@ -209,9 +224,15 @@ def main()->int:
                 for event in read_events(store):engine.job_event(event['state'],event['origin'],event['session'],event['id'])
                 self.last_inbox=now
             if now-self.last_screens>2:engine.set_screens(screens());self.last_screens=now
-            self.move(round(engine.x),round(engine.y));self.render_current()
-            self.setToolTip(f'Fubuki Pet\nState: {engine.state}\nArt: {self.displayed}\nSource: {engine.source_label}')
-            self.status_action.setText(f'{engine.state} | '+('그림 없음' if self.missing_art else '재생 중'))
+            pos_xy=(round(engine.x),round(engine.y))
+            if getattr(self,'_last_pos_xy',None)!=pos_xy:
+                self._last_pos_xy=pos_xy;self.move(*pos_xy)
+            self.render_current()
+            meta_key=(engine.state,self.displayed,engine.source_label,self.missing_art)
+            if getattr(self,'_last_meta_key',None)!=meta_key:
+                self._last_meta_key=meta_key
+                self.setToolTip(f'Fubuki Pet\nState: {engine.state}\nArt: {self.displayed}\nSource: {engine.source_label}')
+                self.status_action.setText(f'{engine.state} | '+('그림 없음' if self.missing_art else '재생 중'))
             if self.debug is not None and self.debug.isVisible():self.debug.refresh()
             active=engine.dragging or engine.state in {'release','fall','landing','recover'}
             interval=round(1000/(settings.active_fps if active else settings.idle_fps))
@@ -241,36 +262,107 @@ def main()->int:
                 p=event.globalPosition() if hasattr(event, "globalPosition") else event.globalPos();engine.tick(time.monotonic());engine.pointer_up(p.x(),p.y())
                 self.last_cursor=(p.x(),p.y())
                 self.move(round(engine.x),round(engine.y));self.render_current();event.accept()
-        def contextMenuEvent(self,event):self.menu.exec(event.globalPos())
+        def contextMenuEvent(self,event):
+            engine.cancel_pointer()
+            self.open_context_bubble()
+            event.accept()
+        def open_context_bubble(self):
+            from .chat_bubble import PetContextBubble
+            if self.context_bubble is None:
+                self.context_bubble=PetContextBubble(self,engine,settings)
+            self.context_bubble.popup_near_anchor()
         def hideEvent(self,event):engine.cancel_pointer();super().hideEvent(event)
         def save(self):
             obj={'settings':asdict(settings),'x':engine.x,'y':engine.y,'candidate_art':True,'reduced_motion':engine.reduced_motion}
             try:
                 p=store/'settings.json';tmp=store/'settings.json.tmp';tmp.write_text(json.dumps(obj,indent=2),encoding='utf-8');tmp.replace(p)
             except OSError:pass
+        def _ensure_chat(self):
+            from .chat_bubble import BubbleChat as ChatWindow
+            if self.chat is None:
+                self.chat=ChatWindow(store/'chatgpt',mock=args.chat_mock,anchor=self)
+                self.chat.state_changed.connect(lambda state:engine.job_event(state,'local_app',getattr(self.chat,'current_provider','chatgpt')))
+            return self.chat
+        def open_chat(self):
+            self._ensure_chat().open_bubble()
+        def open_chat_provider(self,provider_code):
+            chat=self._ensure_chat()
+            chat.select_provider(provider_code)
+            chat.open_bubble()
+        def open_chat_settings(self):
+            chat=self._ensure_chat()
+            chat.open_settings()
         def open_debug(self):
             if self.debug is None:self.debug=DebugPanel()
-            self.debug.show();self.debug.raise_();self.debug.refresh()
-        def quit(self):self.save();self.tray.hide();app.quit()
+            self.debug.show();self.debug.raise_();self.debug.activateWindow();self.debug.refresh()
+        def quit(self):
+            if self.chat and not self.chat.shutdown():
+                QMessageBox.information(self,'후부키','연결 요청이 종료되는 중입니다. 잠시 후 다시 종료해 주세요.');return
+            if self.context_bubble is not None:self.context_bubble.hide()
+            self.save();self.tray.hide();app.quit()
 
     class DebugPanel(QWidget):
         def __init__(self):
-            super().__init__();self.setWindowTitle('Fubuki Pet 동작 패널');self.resize(520,420)
+            super().__init__()
+            from .chat_bubble import SKY_THEME,load_chat_fonts
+            load_chat_fonts()
+            self._drag_offset=None
+            self.setWindowTitle('Fubuki Pet 동작 패널')
+            self.setObjectName('fubukiSettings')
+            self.setWindowFlags(Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint)
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            self.setStyleSheet(SKY_THEME)
+            self.resize(410,360)
             layout=QVBoxLayout(self)
-            warning=QLabel('아래 버튼으로 동작과 작업 상태를 직접 바꿀 수 있습니다.\nChatGPT 웹의 작업 상태를 자동으로 읽지는 않습니다.\n기존 그림을 통합했으며 그림과 사용감은 직접 확인해 주세요.')
-            warning.setWordWrap(True);layout.addWidget(warning)
-            self.details=QLabel();self.details.setWordWrap(True);layout.addWidget(self.details)
-            combo=QComboBox();combo.addItems(['working','thinking','waiting','success','failed','review','idle']);layout.addWidget(combo)
-            send=QPushButton('수동 작업 상태 보내기');send.clicked.connect(lambda:engine.job_event(combo.currentText(),'manual','debug'));layout.addWidget(send)
-            wave=QPushButton('인사하기');wave.clicked.connect(lambda:engine.debug_action('wave'));layout.addWidget(wave)
-            shared=QComboBox();shared.addItems(['idle','walk_right','walk_left','wave','jump','failed','waiting','working','review']);layout.addWidget(shared)
-            play_shared=QPushButton('선택한 동작 재생');play_shared.clicked.connect(lambda:engine.debug_action(shared.currentText()));layout.addWidget(play_shared)
-            self.trace=QLabel();self.trace.setWordWrap(True);layout.addWidget(self.trace)
+            layout.setContentsMargins(18,12,18,14)
+            layout.setSpacing(8)
+            head=QHBoxLayout();head.setSpacing(6)
+            title=QLabel('후부키 동작 · 상태 패널');title.setObjectName('speaker');head.addWidget(title)
+            head.addStretch()
+            close_btn=QPushButton('−');close_btn.setFixedSize(22,22);close_btn.clicked.connect(self.hide);head.addWidget(close_btn)
+            layout.addLayout(head)
+            card=QWidget();card.setObjectName('settingsCard')
+            card_layout=QVBoxLayout(card);card_layout.setContentsMargins(10,10,10,10);card_layout.setSpacing(6)
+            warning=QLabel('아래 버튼으로 동작과 작업 상태를 직접 테스트할 수 있습니다.')
+            warning.setObjectName('captionNote');warning.setWordWrap(True);card_layout.addWidget(warning)
+            self.details=QLabel();self.details.setObjectName('status');self.details.setWordWrap(True);card_layout.addWidget(self.details)
+            row1=QHBoxLayout();row1.setSpacing(4)
+            combo=QComboBox();combo.addItems(['working','thinking','waiting','success','failed','review','idle']);row1.addWidget(combo,1)
+            send=QPushButton('작업 상태 적용');send.clicked.connect(lambda:engine.job_event(combo.currentText(),'manual','debug'));row1.addWidget(send)
+            card_layout.addLayout(row1)
+            row2=QHBoxLayout();row2.setSpacing(4)
+            shared=QComboBox();shared.addItems(['idle','walk_right','walk_left','wave','jump','failed','waiting','working','review']);row2.addWidget(shared,1)
+            play_shared=QPushButton('동작 재생');play_shared.setObjectName('send');play_shared.clicked.connect(lambda:engine.debug_action(shared.currentText()));row2.addWidget(play_shared)
+            wave=QPushButton('인사');wave.clicked.connect(lambda:engine.debug_action('wave'));row2.addWidget(wave)
+            card_layout.addLayout(row2)
+            self.trace=QLabel();self.trace.setObjectName('status');self.trace.setWordWrap(True);card_layout.addWidget(self.trace)
+            layout.addWidget(card)
             self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose,False)
+        def paintEvent(self,event):
+            from PySide6.QtGui import QPainterPath,QColor,QPen
+            p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            body=QPainterPath();body.addRoundedRect(6,3,self.width()-12,self.height()-6,22,22)
+            p.setPen(QPen(QColor('#AFD7EC'),1.5));p.setBrush(QColor('#F8FCFF'));p.drawPath(body)
+        def mousePressEvent(self,event):
+            if event.button()==Qt.MouseButton.LeftButton:
+                pos=event.position().toPoint() if hasattr(event,'position') else event.pos()
+                if pos.y()<=42:
+                    gpos=event.globalPosition().toPoint() if hasattr(event,'globalPosition') else event.globalPos()
+                    self._drag_offset=gpos-self.frameGeometry().topLeft();event.accept();return
+            super().mousePressEvent(event)
+        def mouseMoveEvent(self,event):
+            if self._drag_offset is not None and event.buttons()&Qt.MouseButton.LeftButton:
+                gpos=event.globalPosition().toPoint() if hasattr(event,'globalPosition') else event.globalPos()
+                self.move(gpos-self._drag_offset);event.accept();return
+            super().mouseMoveEvent(event)
+        def mouseReleaseEvent(self,event):
+            self._drag_offset=None;super().mouseReleaseEvent(event)
         def refresh(self):
             self.details.setText(json.dumps(engine.snapshot(),ensure_ascii=False,indent=2)+'\nDISPLAY: '+overlay.displayed)
             self.trace.setText('최근 전환: '+' → '.join(x['to'] for x in list(engine.history)[-8:]))
     overlay=Overlay()
+    if args.chat or args.chat_mock:overlay.open_chat()
+    else:QTimer.singleShot(0,overlay._ensure_chat)
     if args.debug:overlay.open_debug()
     app.aboutToQuit.connect(overlay.save)
     return app.exec()

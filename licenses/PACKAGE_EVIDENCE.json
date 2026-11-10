@@ -1,0 +1,80 @@
+[
+  {
+    "wheel": "pyinstaller-6.22.3-py3-none-win_amd64.whl",
+    "sha256": "500bd58c7bf7e584a8435adccbd763a0b918d5c12b08d74ff50fd79b2915458b",
+    "metadata": [
+      "Name: pyinstaller",
+      "Version: 6.22.3",
+      "License: GPLv2-or-later with a special exception which allows to use PyInstaller to build and distribute non-free programs (including commercial ones)",
+      "License-File: COPYING.txt"
+    ],
+    "license_paths": [
+      "pyinstaller-6.22.3.dist-info/licenses/COPYING.txt"
+    ]
+  },
+  {
+    "wheel": "pyside6-6.12.0-cp310-abi3-win_amd64.whl",
+    "sha256": "31a8d2893f2f28ab483b1534dde0438f27af6e234593de30425cb4729052d8f8",
+    "metadata": [
+      "Name: PySide6",
+      "Version: 6.12.0",
+      "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+      "License-File: LicenseRef-Qt-Commercial.txt"
+    ],
+    "license_paths": [
+      "pyside6-6.12.0.dist-info/licenses/LicenseRef-Qt-Commercial.txt"
+    ]
+  },
+  {
+    "wheel": "pyside6_addons-6.12.0-cp310-abi3-win_amd64.whl",
+    "sha256": "98d8d62010da6605344cee83e5c96fb846170a1f2d924523f10f5d92078b02b0",
+    "metadata": [
+      "Name: PySide6_Addons",
+      "Version: 6.12.0",
+      "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+      "License-File: LicenseRef-Qt-Commercial.txt"
+    ],
+    "license_paths": [
+      "pyside6_addons-6.12.0.dist-info/licenses/LicenseRef-Qt-Commercial.txt"
+    ]
+  },
+  {
+    "wheel": "pyside6_essentials-6.12.0-cp310-abi3-win_amd64.whl",
+    "sha256": "c9a95102aa23c1f86516a30d5a9be37552d324eee7e567eb7508973f1218cb42",
+    "metadata": [
+      "Name: PySide6_Essentials",
+      "Version: 6.12.0",
+      "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+      "License-File: LicenseRef-Qt-Commercial.txt"
+    ],
+    "license_paths": [
+      "pyside6_essentials-6.12.0.dist-info/licenses/LicenseRef-Qt-Commercial.txt"
+    ]
+  },
+  {
+    "wheel": "pyside6_pdf-6.12.0.140-cp310-abi3-win_amd64.whl",
+    "sha256": "4971ba1a0ca15e7c29cfd808e9600aeb46b2305dad01456eb09fa3197166268e",
+    "metadata": [
+      "Name: PySide6_Pdf",
+      "Version: 6.12.0.140",
+      "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+      "License-File: LicenseRef-Qt-Commercial.txt"
+    ],
+    "license_paths": [
+      "pyside6_pdf-6.12.0.140.dist-info/licenses/LicenseRef-Qt-Commercial.txt"
+    ]
+  },
+  {
+    "wheel": "shiboken6-6.12.0-cp310-abi3-win_amd64.whl",
+    "sha256": "a1906cb8116869178c64b6bab52623bbc8b4ceed7b30bfc3c9aa0f6e67f6438e",
+    "metadata": [
+      "Name: shiboken6",
+      "Version: 6.12.0",
+      "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+      "License-File: LicenseRef-Qt-Commercial.txt"
+    ],
+    "license_paths": [
+      "shiboken6-6.12.0.dist-info/licenses/LicenseRef-Qt-Commercial.txt"
+    ]
+  }
+]

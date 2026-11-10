@@ -1,16 +1,18 @@
-# Fubuki Pet
+# Fubuki Pet — 공개 준비 검토 사본
 
-Read **README_ko.txt** for installation, controls, limitations, and source/build instructions.
+후부키를 ChatGPT Work 펫 또는 독립 Windows 데스크톱 펫으로 사용하는 두 가지 패키지입니다.
+현재 공개 릴리스가 아니며, 설치 파일·코드·그림의 배포 범위와 라이선스를 최종 검토해야 합니다.
 
-A standalone desktop pet with local mouse interactions, physics, remembered settings, optional file-based state events, and Windows portable packaging. No server, ChatGPT private API, or automatic hook installation is used.
+| 사용 환경 | 준비된 설치 방식 | 필요한 것 |
+|---|---|---|
+| Windows 10/11 x64 | 설치 EXE 실행 → 설치 → 시작 메뉴에서 실행 | Python·ChatGPT 계정 불필요 |
+| ChatGPT Work 웹 | 공식 공유 링크 입양, 또는 스프라이트 첨부 후 Pets로 추가 | Pets 사용 가능한 ChatGPT 계정 |
 
-- Windows source: `START_FUBUKI.cmd`
-- Windows portable build: `build_windows.cmd`
-- Linux source: `sh run_linux.sh`
-- Optional state panel: add `--debug`
+[Work 설치 안내](work-pet/INSTALL.md), [Windows 설치 프로그램 빌드](installer/README.md), [권리 검토 상태](RIGHTS_STATUS.md)를 확인하세요.
+Windows 조작 방법은 [README_ko.txt](README_ko.txt)에 있습니다.
 
-Existing illustration provenance remains in `assets/runtime_candidate.json`. A successful build is not a claim that manual/visual acceptance has been completed.
+독립 Windows 펫은 로컬 마우스 상호작용·물리 동작·설정 저장을 제공합니다. 선택적으로 로컬 상태 이벤트를 받을 수 있습니다.
+Windows 프로그램이 ChatGPT 웹 대화나 비공개 API를 읽지는 않습니다. Work v2의 16방향 시선은 독립 Windows 프로그램에 포함된 기능이 아닙니다.
 
-## Repository scope
-
-This private repository contains the current runtime and Windows build source subset, including the 139 required runtime resources. Unused artwork, historical backups, caches, and old verification logs are omitted. All 250 original assets remain preserved in the full source attachment, `FubukiPet_Source_1.0.0_20261103.zip`. This transfer does not alter the original source attachment or certify manual/visual acceptance.
+검토 후보에는 원래 Git 이력, 개인 QA ZIP, 개인 설정, 로그, 인증 파일을 넣지 않습니다.
+그림과 기존 프로그램 코드는 원본을 보존한 사본에서 준비했습니다. 설치 시험 통과와 그림·마우스·DPI·다중 모니터 사용감 검수는 별개의 결과입니다.

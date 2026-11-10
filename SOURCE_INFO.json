@@ -3,10 +3,6 @@
   "version": "1.0.0",
   "manual_validation": "user_pending",
   "preserved_core": true,
-  "original_inputs": [
-    "Fubuki_Combined_Offscreen_Only_NO_WINDOWS_VALIDATION_20261103.zip",
-    "Fubuki_Boolean_Settings_Repair_OFFSCREEN_ONLY_20261103.zip"
-  ],
   "changes": [
     "Normal source launch without a candidate flag",
     "Duplicate instance lock",
@@ -22,7 +18,6 @@
   ],
   "artwork": "Original integrated candidates retained without editing",
   "full_source_preserved_assets": 250,
-  "repository_scope": "Current runtime and Windows build source subset; original full source attachment is unchanged",
-  "included_runtime_resource_files": 139,
-  "full_source_attachment": "FubukiPet_Source_1.0.0_20261103.zip"
+  "repository_scope": "Review candidate copy; original private repository and full source remain preserved separately",
+  "included_runtime_resource_files": 139
 }
