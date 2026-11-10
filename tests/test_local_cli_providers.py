@@ -202,6 +202,7 @@ class LocalCLIClientTests(unittest.TestCase):
                     [{"role": "user", "content": "안녕"}],
                     "gemini-3.1-pro-preview",
                     deltas.append,
+                    reasoning_effort="low",
                 )
                 self.assertEqual(reply, "반가워요! 후부키예요.")
                 self.assertEqual(deltas, ["반가워요! 후부키예요."])
@@ -210,6 +211,21 @@ class LocalCLIClientTests(unittest.TestCase):
                 self.assertIn("gemini-3.1-pro-preview", cmd)
                 self.assertIn("--approval-mode", cmd)
                 self.assertIn("plan", cmd)
+                settings_file = client.workspace_dir / ".gemini" / "settings.json"
+                self.assertTrue(settings_file.is_file())
+                cfg = json.loads(settings_file.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    cfg["modelConfigs"]["customAliases"]["chat-base-3"]["modelConfig"]["generateContentConfig"]["thinkingConfig"]["thinkingLevel"],
+                    "LOW",
+                )
+            with self.assertRaises(ChatGPTError) as caught:
+                client.stream_reply(
+                    [{"role": "user", "content": "안녕"}],
+                    "gemini-3.1-pro-preview",
+                    lambda d: None,
+                    reasoning_effort="xhigh",
+                )
+            self.assertEqual(str(caught.exception), REASONING_REJECTED)
 
 
 class MultiProviderUITests(unittest.TestCase):

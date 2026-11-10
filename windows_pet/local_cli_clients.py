@@ -43,6 +43,7 @@ GEMINI_CLI_MODELS = (
 )
 
 VALID_GEMINI_CLI_SLUGS = frozenset(slug for slug, _ in GEMINI_CLI_MODELS)
+GEMINI_CLI_EFFORTS = ("low", "high")
 ANTIGRAVITY_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 STRIPPED_API_KEY_VARS = (
@@ -246,9 +247,42 @@ class GeminiCLIClient:
                 raise ChatGPTError("먼저 로컬 Gemini CLI에 연결하세요.")
         return [{"slug": slug, "display_name": name} for slug, name in GEMINI_CLI_MODELS]
 
+    def _configure_workspace_effort(self, reasoning_effort: str | None) -> None:
+        settings_dir = self.workspace_dir / ".gemini"
+        settings_file = settings_dir / "settings.json"
+        if reasoning_effort is None:
+            settings_file.unlink(missing_ok=True)
+            return
+        level = reasoning_effort.upper()
+        budget = 1024 if reasoning_effort == "low" else 24576
+        payload = {
+            "modelConfigs": {
+                "customAliases": {
+                    "chat-base-3": {
+                        "extends": "chat-base",
+                        "modelConfig": {
+                            "generateContentConfig": {
+                                "thinkingConfig": {"thinkingLevel": level}
+                            }
+                        },
+                    },
+                    "chat-base-2.5": {
+                        "extends": "chat-base",
+                        "modelConfig": {
+                            "generateContentConfig": {
+                                "thinkingConfig": {"thinkingBudget": budget}
+                            }
+                        },
+                    },
+                }
+            }
+        }
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        settings_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
     def stream_reply(self, messages, model, on_delta, cancel_event=None, *, reasoning_effort=None):
         _validate_reasoning_effort(reasoning_effort)
-        if reasoning_effort is not None:
+        if reasoning_effort is not None and reasoning_effort not in GEMINI_CLI_EFFORTS:
             raise ChatGPTError(REASONING_REJECTED)
         _check(cancel_event)
         with self._lock:
@@ -257,6 +291,7 @@ class GeminiCLIClient:
         selected_model = model or "auto"
         if not _is_gemini_model_slug(selected_model) or selected_model not in VALID_GEMINI_CLI_SLUGS:
             raise ChatGPTError("지원하지 않는 Gemini 모델입니다.")
+        self._configure_workspace_effort(reasoning_effort)
         prompt = _validate_and_format_messages(messages)
         base_cmd = _find_gemini_cli_command()
         cmd = [
@@ -606,7 +641,7 @@ class MockLocalCLIClient:
 
     def stream_reply(self, messages, model, on_delta, cancel_event=None, *, reasoning_effort=None):
         _validate_reasoning_effort(reasoning_effort)
-        if self.provider == "gemini" and reasoning_effort is not None:
+        if self.provider == "gemini" and reasoning_effort is not None and reasoning_effort not in GEMINI_CLI_EFFORTS:
             raise ChatGPTError(REASONING_REJECTED)
         if self.provider == "antigravity_gemini" and reasoning_effort is not None and reasoning_effort not in ANTIGRAVITY_EFFORTS:
             raise ChatGPTError(REASONING_REJECTED)
