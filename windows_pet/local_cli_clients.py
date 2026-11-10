@@ -72,6 +72,9 @@ def _sanitized_env() -> dict[str, str]:
         env.pop(key, None)
     env["PYTHONIOENCODING"] = "utf-8"
     env["NO_COLOR"] = "1"
+    env["GEMINI_CLI_NO_RELAUNCH"] = "true"
+    env["DISABLE_AUTOUPDATER"] = "1"
+    env["NO_UPDATE_NOTIFIER"] = "1"
     return env
 
 
@@ -209,6 +212,7 @@ class GeminiCLIClient:
         self._connected = False
         self._label = ""
         self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
+        self._last_effort_setting = "__unset__"
 
     def session_info(self):
         with self._lock:
@@ -304,6 +308,9 @@ class GeminiCLIClient:
         return [{"slug": slug, "display_name": name} for slug, name in GEMINI_CLI_MODELS]
 
     def _configure_workspace_effort(self, reasoning_effort: str | None) -> None:
+        if getattr(self, "_last_effort_setting", "__unset__") == reasoning_effort:
+            return
+        self._last_effort_setting = reasoning_effort
         settings_dir = self.workspace_dir / ".gemini"
         settings_file = settings_dir / "settings.json"
         if reasoning_effort is None:
@@ -464,6 +471,7 @@ class AntigravityGeminiClient:
         self._connected = False
         self._label = ""
         self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
+        self._last_effort_setting = "__unset__"
         self._cached_models: list[dict[str, str]] = []
 
     def session_info(self):

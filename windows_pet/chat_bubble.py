@@ -53,17 +53,24 @@ class SnowBubble(QWidget):
     def __init__(self):
         super().__init__(None,Qt.WindowType.Tool|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint)
         self.side='right'
+        self._path_cache_key=None
+        self._cached_path=None
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
     def paintEvent(self,event):
+        w,h,side=self.width(),self.height(),self.side
+        key=(w,h,side)
+        if self._path_cache_key!=key or self._cached_path is None:
+            body=QPainterPath();body.addRoundedRect(12,3,w-24,h-7,22,22)
+            tail=QPainterPath()
+            if side=='right':
+                tail.moveTo(13,55);tail.lineTo(2,65);tail.lineTo(13,75)
+            else:
+                tail.moveTo(w-13,55);tail.lineTo(w-2,65);tail.lineTo(w-13,75)
+            tail.closeSubpath()
+            self._cached_path=body.united(tail)
+            self._path_cache_key=key
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        body=QPainterPath();body.addRoundedRect(12,3,self.width()-24,self.height()-7,22,22)
-        tail=QPainterPath()
-        if self.side=='right':
-            tail.moveTo(13,55);tail.lineTo(2,65);tail.lineTo(13,75)
-        else:
-            tail.moveTo(self.width()-13,55);tail.lineTo(self.width()-2,65);tail.lineTo(self.width()-13,75)
-        tail.closeSubpath();body=body.united(tail)
-        p.setPen(QPen(QColor('#AFD7EC'),1.5));p.setBrush(QColor('#F8FCFF'));p.drawPath(body)
+        p.setPen(QPen(QColor('#AFD7EC'),1.5));p.setBrush(QColor('#F8FCFF'));p.drawPath(self._cached_path)
 
 
 class BubbleInput(QPlainTextEdit):
@@ -112,11 +119,21 @@ def place_bubble(anchor, area, width, height, side='right'):
 
 def anchor_head_rect(anchor, fallback):
     """Use the visible upper sprite mask, not transparent canvas or tail width."""
-    if anchor is None or anchor.mask().isEmpty():return fallback
-    from PySide6.QtGui import QRegion
+    if anchor is None:return fallback
     mask=anchor.mask()
+    if mask.isEmpty():return fallback
     bounds=mask.boundingRect()
-    upper=mask.intersected(QRegion(QRect(bounds.x(),bounds.y(),bounds.width(),max(1,int(bounds.height()*.4))))).boundingRect()
+    mask_sig=(bounds.x(),bounds.y(),bounds.width(),bounds.height(),mask.rectCount())
+    cached=getattr(anchor,'_cached_head_upper',None)
+    if cached is not None and cached[0]==mask_sig:
+        upper=cached[1]
+    else:
+        from PySide6.QtGui import QRegion
+        upper=mask.intersected(QRegion(QRect(bounds.x(),bounds.y(),bounds.width(),max(1,int(bounds.height()*.4))))).boundingRect()
+        try:
+            anchor._cached_head_upper=(mask_sig,upper)
+        except Exception:
+            pass
     return upper.translated(anchor.frameGeometry().topLeft()) if not upper.isEmpty() else fallback
 
 
@@ -247,10 +264,13 @@ class BubbleChat(ChatWindow):
                 lines.append('💬 나: '+last['content'])
         if footer:
             lines.append(footer)
-        self.transcript.setPlainText('\n'.join(lines))
-        # Keep the user's own utterance visible at the top of the compact speech bubble.
-        self.transcript.verticalScrollBar().setValue(0)
-        self._transcript_rev=getattr(self,'_transcript_rev',0)+1
+        text='\n'.join(lines)
+        if getattr(self,'_last_rendered_text',None)!=text:
+            self._last_rendered_text=text
+            self.transcript.setPlainText(text)
+            # Keep the user's own utterance visible at the top of the compact speech bubble.
+            self.transcript.verticalScrollBar().setValue(0)
+            self._transcript_rev=getattr(self,'_transcript_rev',0)+1
     def open_bubble(self):
         self.bubble.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating,False)
         self.follow_anchor(force=True);self.launch_button.hide();self.bubble.show();self.follow_anchor(force=True);self.bubble.raise_()
@@ -296,8 +316,13 @@ class BubbleChat(ChatWindow):
         screen=QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
         if not screen:return
         area=screen.availableGeometry()
-        head=anchor_head_rect(self.anchor,rect)
         bubble_visible=self.bubble.isVisible()
+        if not force and bubble_visible and getattr(self,'_last_anchor_rect',None)==rect and getattr(self,'_last_head_rect',None) is not None:
+            head=self._last_head_rect
+        else:
+            head=anchor_head_rect(self.anchor,rect)
+            self._last_anchor_rect=QRect(rect)
+            self._last_head_rect=QRect(head)
         is_expanded=bool(getattr(self,'expanded',False))
         vp_width=max(1,self.transcript.viewport().width())
         state_key=(
@@ -321,11 +346,18 @@ class BubbleChat(ChatWindow):
         if int(self.transcript.document().textWidth())!=vp_width:
             self.transcript.document().setTextWidth(vp_width)
         min_h,max_h=(140,240) if is_expanded else (56,96)
-        self.transcript.setMinimumHeight(min_h);self.transcript.setMaximumHeight(max_h)
+        if self.transcript.minimumHeight()!=min_h or self.transcript.maximumHeight()!=max_h:
+            self.transcript.setMinimumHeight(min_h);self.transcript.setMaximumHeight(max_h)
         reply_height=max(min_h,min(max_h,int(self.transcript.document().size().height())+12))
         if self.transcript.height()!=reply_height:
             self.transcript.setFixedHeight(reply_height)
-        height=self.bubble.sizeHint().height()
+        layout_sig=(reply_height,self.input.height(),is_expanded,self.status.text())
+        if not force and getattr(self,'_last_layout_sig',None)==layout_sig and getattr(self,'_last_bubble_h',0)>0:
+            height=self._last_bubble_h
+        else:
+            height=self.bubble.sizeHint().height()
+            self._last_layout_sig=layout_sig
+            self._last_bubble_h=height
         target_width=360 if is_expanded else 286
         bubble_anchor=QRect(head.x(),head.y()-40,head.width(),head.height())
         geometry,new_side=place_bubble(bubble_anchor,area,target_width,height,self.side)

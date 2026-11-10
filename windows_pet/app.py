@@ -199,13 +199,15 @@ def main()->int:
                 self.cache[key]=(pm,region)
                 if len(self.cache)>64:self.cache.popitem(last=False)
             else:self.cache.move_to_end(key)
-            self.pixmap,region=self.cache[key];self.current_key=key
-            self.setFixedSize(self.pixmap.size());self.setMask(region);self.update()
+            self.pixmap,region=self.cache[key];self.current_key=key;self.current_region=region
+            if self.size()!=self.pixmap.size():self.setFixedSize(self.pixmap.size())
+            self.setMask(region);self.update()
         def is_opaque(self,gx,gy):
             if self.pixmap is None:return False
             # Hit the frame currently displayed, not an unpainted physics step.
             local=self.mapFromGlobal(QPoint(round(gx),round(gy)))
-            return self.mask().contains(local)
+            reg=getattr(self,'current_region',None)
+            return reg.contains(local) if reg is not None else self.mask().contains(local)
         def tick(self):
             now=time.monotonic();engine.tick(now)
             cur=QCursor.pos();xy=(cur.x(),cur.y())
@@ -220,9 +222,15 @@ def main()->int:
                 for event in read_events(store):engine.job_event(event['state'],event['origin'],event['session'],event['id'])
                 self.last_inbox=now
             if now-self.last_screens>2:engine.set_screens(screens());self.last_screens=now
-            self.move(round(engine.x),round(engine.y));self.render_current()
-            self.setToolTip(f'Fubuki Pet\nState: {engine.state}\nArt: {self.displayed}\nSource: {engine.source_label}')
-            self.status_action.setText(f'{engine.state} | '+('그림 없음' if self.missing_art else '재생 중'))
+            pos_xy=(round(engine.x),round(engine.y))
+            if getattr(self,'_last_pos_xy',None)!=pos_xy:
+                self._last_pos_xy=pos_xy;self.move(*pos_xy)
+            self.render_current()
+            meta_key=(engine.state,self.displayed,engine.source_label,self.missing_art)
+            if getattr(self,'_last_meta_key',None)!=meta_key:
+                self._last_meta_key=meta_key
+                self.setToolTip(f'Fubuki Pet\nState: {engine.state}\nArt: {self.displayed}\nSource: {engine.source_label}')
+                self.status_action.setText(f'{engine.state} | '+('그림 없음' if self.missing_art else '재생 중'))
             if self.debug is not None and self.debug.isVisible():self.debug.refresh()
             active=engine.dragging or engine.state in {'release','fall','landing','recover'}
             interval=round(1000/(settings.active_fps if active else settings.idle_fps))

@@ -40,20 +40,20 @@ class Operation(QThread):
         self.action = action
         self.cancel = threading.Event()
         if char_delay is None:
-            self.char_delay = 0.001 if os.environ.get('QT_QPA_PLATFORM') == 'offscreen' else 0.022
+            self.char_delay = 0.001 if os.environ.get('QT_QPA_PLATFORM') == 'offscreen' else 0.015
         else:
             self.char_delay = float(char_delay)
     def _emit_delta(self, text):
         if not text or self.cancel.is_set():
             return
         delay = self.char_delay
-        if delay > 0 and len(text) > 120:
-            delay = max(0.008, delay * 80.0 / len(text))
-        for ch in text:
+        step = 2 if (delay > 0.005 and len(text) > 60) else 1
+        for idx in range(0, len(text), step):
             if self.cancel.is_set():
                 return
-            self.delta.emit(ch)
-            if delay > 0 and not ch.isspace():
+            chunk = text[idx:idx + step]
+            self.delta.emit(chunk)
+            if delay > 0 and not chunk.isspace():
                 if self.cancel.wait(delay):
                     return
     def run(self):
@@ -406,9 +406,12 @@ class ChatWindow(QWidget):
             typing_text = (self.current_text + '▍') if (self.current_text and not footer) else (self.current_text or ('…' if not footer else ''))
             lines += ['나: '+self.pending_user, '후부키: '+typing_text]
         if footer: lines.append(footer)
-        self.transcript.setPlainText('\n\n'.join(lines))
-        self.transcript.verticalScrollBar().setValue(self.transcript.verticalScrollBar().maximum())
-        self._transcript_rev = getattr(self, '_transcript_rev', 0) + 1
+        text = '\n\n'.join(lines)
+        if getattr(self, '_last_rendered_text', None) != text:
+            self._last_rendered_text = text
+            self.transcript.setPlainText(text)
+            self.transcript.verticalScrollBar().setValue(self.transcript.verticalScrollBar().maximum())
+            self._transcript_rev = getattr(self, '_transcript_rev', 0) + 1
     def on_result(self, value):
         if self.operation == 'models':
             self._provider_models[self.current_provider] = list(value)
