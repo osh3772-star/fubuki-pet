@@ -437,6 +437,82 @@ class MultiProviderUITests(unittest.TestCase):
         self.assertNotIn("▍", self.window.transcript.toPlainText())
         self.assertIn("후부키: 안녕하세요!", self.window.transcript.toPlainText())
 
+    def test_pet_context_bubble_snow_card_design(self):
+        from PySide6.QtWidgets import QWidget
+        from windows_pet.chat_bubble import PetContextBubble, SnowBubble
+        from windows_pet.core import PetEngine, Rect, Settings
+
+        settings = Settings()
+        engine = PetEngine([Rect(0, 0, 1920, 1080)], settings, 0.0)
+
+        class DummyOverlay(QWidget):
+            def __init__(self, chat_win):
+                super().__init__()
+                self.missing_art = False
+                self.chat = chat_win
+                self.resized_to = None
+                self.resize(160, 160)
+                self.move(800, 600)
+
+            def open_chat(self):
+                self.chat.open_bubble()
+
+            def open_chat_settings(self):
+                self.chat.open_settings()
+
+            def open_chat_provider(self, code):
+                self.chat.select_provider(code)
+
+            def resize_pet(self, v):
+                settings.scale = v
+                self.resized_to = v
+
+            def toggle_top(self, v):
+                settings.always_on_top = v
+
+            def toggle_motion(self, v):
+                engine.reduced_motion = v
+
+            def toggle_inbox(self, v):
+                settings.event_inbox_enabled = v
+
+            def startup_enabled(self):
+                return False
+
+            def toggle_startup(self, v):
+                pass
+
+            def bring_back(self):
+                pass
+
+            def open_debug(self):
+                pass
+
+            def quit(self):
+                pass
+
+        dummy_overlay = DummyOverlay(self.window)
+        ctx = PetContextBubble(dummy_overlay, engine, settings)
+        self.assertIsInstance(ctx, SnowBubble)
+        ctx.popup_near_anchor()
+        self.app.processEvents()
+        self.assertTrue(ctx.isVisible())
+        self.assertEqual(ctx.objectName(), "fubukiBubble")
+        self.assertTrue(bool(ctx.windowFlags() & Qt.WindowType.FramelessWindowHint))
+        self.assertFalse(ctx.grab().isNull())
+
+        # Test scale and option toggles inside the snow context bubble
+        ctx.scale_buttons[1.5].click()
+        self.assertEqual(dummy_overlay.resized_to, 1.5)
+        self.assertEqual(ctx.scale_buttons[1.5].objectName(), "send")
+
+        initial_motion = engine.reduced_motion
+        ctx.motion_btn.click()
+        self.assertEqual(engine.reduced_motion, not initial_motion)
+
+        ctx.hide()
+        dummy_overlay.close()
+
 
 if __name__ == "__main__":
     unittest.main()

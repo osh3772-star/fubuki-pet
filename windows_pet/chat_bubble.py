@@ -44,6 +44,13 @@ QPushButton:disabled { color: #758692; background: #EDF1F4; border-color: #DCE4E
 QPushButton#send { background: #246E96; border-color: #246E96; color: white; font-weight: 700; }
 QPushButton#send:hover { background: #195979; }
 QPushButton#send:disabled { background: #D5E3EC; color: #657B89; border-color: #D5E3EC; }
+QPushButton#danger { background: #FDF2F4; border: 1px solid #F1C5CE; border-radius: 10px; color: #9C2B43; font-weight: 600; }
+QPushButton#danger:hover { background: #FCE2E7; border-color: #E29AA9; }
+QMenu { background: #F8FCFF; border: 1.5px solid #AFD7EC; border-radius: 12px; padding: 6px; color: #203E55; font-family: 'Noto Sans KR', 'Noto Sans JP', 'Malgun Gothic'; font-size: 12px; }
+QMenu::item { padding: 5px 18px 5px 12px; border-radius: 7px; background: transparent; }
+QMenu::item:selected { background: #D6EEFC; color: #183E59; font-weight: 600; }
+QMenu::item:disabled { color: #758692; }
+QMenu::separator { height: 1px; background: #D5EAF7; margin: 4px 6px; }
 QScrollBar:vertical { background: transparent; width: 7px; margin: 2px; }
 QScrollBar::handle:vertical { background: #A9CCDF; border-radius: 3px; min-height: 24px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
@@ -370,3 +377,240 @@ class BubbleChat(ChatWindow):
     def shutdown(self):
         if not super().shutdown():return False
         self.timer.stop();self.bubble.hide();self.launch_button.hide();return True
+
+
+class PetContextBubble(SnowBubble):
+    """Snow-bubble styled right-click character settings & control card."""
+    def __init__(self, overlay, engine, settings):
+        super().__init__()
+        load_chat_fonts()
+        self.overlay = overlay
+        self.engine = engine
+        self.settings = settings
+        self._drag_offset = None
+        self.setWindowTitle('후부키 캐릭터 설정')
+        self.setObjectName('fubukiBubble')
+        self.setStyleSheet(SKY_THEME)
+        QShortcut(QKeySequence('Escape'), self, activated=self.hide)
+
+        box = QVBoxLayout(self)
+        box.setContentsMargins(18, 10, 18, 12)
+        box.setSpacing(6)
+
+        head = QHBoxLayout()
+        head.setSpacing(4)
+        title = QLabel('후부키 메뉴')
+        title.setObjectName('speaker')
+        head.addWidget(title)
+        self.state_label = QLabel('')
+        self.state_label.setObjectName('status')
+        head.addWidget(self.state_label)
+        head.addStretch()
+        close_btn = QPushButton('−')
+        close_btn.setFixedSize(22, 22)
+        close_btn.setToolTip('메뉴 닫기')
+        close_btn.clicked.connect(self.hide)
+        head.addWidget(close_btn)
+        box.addLayout(head)
+
+        # Card 1: Chat & AI Provider
+        chat_card = QWidget()
+        chat_card.setObjectName('settingsCard')
+        chat_layout = QVBoxLayout(chat_card)
+        chat_layout.setContentsMargins(9, 8, 9, 8)
+        chat_layout.setSpacing(5)
+
+        top_chat_row = QHBoxLayout()
+        top_chat_row.setSpacing(4)
+        open_chat_btn = QPushButton('💬 대화창 열기')
+        open_chat_btn.setObjectName('send')
+        open_chat_btn.clicked.connect(lambda: (self.hide(), self.overlay.open_chat()))
+        open_cfg_btn = QPushButton('⚙️ AI · 모델 설정')
+        open_cfg_btn.clicked.connect(lambda: (self.hide(), self.overlay.open_chat_settings()))
+        top_chat_row.addWidget(open_chat_btn, 1)
+        top_chat_row.addWidget(open_cfg_btn, 1)
+        chat_layout.addLayout(top_chat_row)
+
+        prov_label = QLabel('대화 공급자 바로 선택')
+        prov_label.setObjectName('inputLabel')
+        chat_layout.addWidget(prov_label)
+        prov_row = QHBoxLayout()
+        prov_row.setSpacing(4)
+        self.provider_buttons = {}
+        for label, code in (('ChatGPT', 'chatgpt'), ('Gemini', 'gemini'), ('Antigravity', 'antigravity_gemini')):
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda checked=False, c=code: (self.hide(), self.overlay.open_chat_provider(c)))
+            prov_row.addWidget(btn, 1)
+            self.provider_buttons[code] = btn
+        chat_layout.addLayout(prov_row)
+        box.addWidget(chat_card)
+
+        # Card 2: Character Scale, Options & Actions
+        pet_card = QWidget()
+        pet_card.setObjectName('settingsCard')
+        pet_layout = QVBoxLayout(pet_card)
+        pet_layout.setContentsMargins(9, 8, 9, 8)
+        pet_layout.setSpacing(5)
+
+        scale_label = QLabel('캐릭터 크기')
+        scale_label.setObjectName('inputLabel')
+        pet_layout.addWidget(scale_label)
+        scale_row = QHBoxLayout()
+        scale_row.setSpacing(4)
+        self.scale_buttons = {}
+        for val in (0.75, 1.0, 1.5, 2.0):
+            btn = QPushButton(f'{val:g}×')
+            btn.clicked.connect(lambda checked=False, v=val: (self.overlay.resize_pet(v), self.sync_state()))
+            scale_row.addWidget(btn, 1)
+            self.scale_buttons[val] = btn
+        pet_layout.addLayout(scale_row)
+
+        opt_row1 = QHBoxLayout()
+        opt_row1.setSpacing(4)
+        self.top_btn = QPushButton('📌 항상 위에 표시')
+        self.top_btn.clicked.connect(self._toggle_top)
+        self.motion_btn = QPushButton('🍃 움직임 줄이기')
+        self.motion_btn.clicked.connect(self._toggle_motion)
+        opt_row1.addWidget(self.top_btn, 1)
+        opt_row1.addWidget(self.motion_btn, 1)
+        pet_layout.addLayout(opt_row1)
+
+        opt_row2 = QHBoxLayout()
+        opt_row2.setSpacing(4)
+        self.inbox_btn = QPushButton('🔔 외부 이벤트 수신')
+        self.inbox_btn.clicked.connect(self._toggle_inbox)
+        self.startup_btn = QPushButton('🚀 자동 시작')
+        self.startup_btn.clicked.connect(self._toggle_startup)
+        opt_row2.addWidget(self.inbox_btn, 1)
+        opt_row2.addWidget(self.startup_btn, 1)
+        pet_layout.addLayout(opt_row2)
+
+        pose_row = QHBoxLayout()
+        pose_row.setSpacing(4)
+        self.pose_combo = QComboBox()
+        for label, code in (
+            ('인사하기 (wave)', 'wave'),
+            ('기본 대기 (idle)', 'idle'),
+            ('오른쪽 걷기', 'walk_right'),
+            ('왼쪽 걷기', 'walk_left'),
+            ('점프 (jump)', 'jump'),
+            ('생각 중 (thinking)', 'thinking'),
+            ('작업 중 (working)', 'working'),
+            ('성공 (success)', 'success'),
+            ('실패 (failed)', 'failed'),
+            ('검토 (review)', 'review'),
+        ):
+            self.pose_combo.addItem(label, code)
+        play_btn = QPushButton('동작 재생')
+        play_btn.clicked.connect(self._play_selected_pose)
+        pose_row.addWidget(self.pose_combo, 1)
+        pose_row.addWidget(play_btn)
+        pet_layout.addLayout(pose_row)
+        box.addWidget(pet_card)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(4)
+        bring_btn = QPushButton('🏠 화면으로 데려오기')
+        bring_btn.clicked.connect(lambda: (self.hide(), self.overlay.bring_back()))
+        debug_btn = QPushButton('🎭 상태 패널')
+        debug_btn.clicked.connect(lambda: (self.hide(), self.overlay.open_debug()))
+        quit_btn = QPushButton('종료')
+        quit_btn.setObjectName('danger')
+        quit_btn.clicked.connect(lambda: (self.hide(), self.overlay.quit()))
+        bottom_row.addWidget(bring_btn, 1)
+        bottom_row.addWidget(debug_btn, 1)
+        bottom_row.addWidget(quit_btn)
+        box.addLayout(bottom_row)
+
+    def _apply_active_style(self, btn: QPushButton, active: bool):
+        btn.setObjectName('send' if active else '')
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+
+    def _toggle_top(self):
+        self.overlay.toggle_top(not self.settings.always_on_top)
+        self.sync_state()
+
+    def _toggle_motion(self):
+        self.overlay.toggle_motion(not self.engine.reduced_motion)
+        self.sync_state()
+
+    def _toggle_inbox(self):
+        self.overlay.toggle_inbox(not self.settings.event_inbox_enabled)
+        self.sync_state()
+
+    def _toggle_startup(self):
+        self.overlay.toggle_startup(not self.overlay.startup_enabled())
+        self.sync_state()
+
+    def _play_selected_pose(self):
+        code = self.pose_combo.currentData()
+        if code in ('idle', 'walk_right', 'walk_left', 'wave', 'jump', 'failed', 'waiting', 'working', 'review'):
+            self.engine.debug_action(code)
+        else:
+            self.engine.job_event(code, 'manual', 'debug')
+        self.sync_state()
+
+    def sync_state(self):
+        state_txt = f"· {self.engine.state} ({'그림 없음' if self.overlay.missing_art else '재생 중'})"
+        self.state_label.setText(state_txt)
+        current_prov = getattr(self.overlay.chat, 'current_provider', 'gemini') if self.overlay.chat else 'gemini'
+        for code, btn in self.provider_buttons.items():
+            self._apply_active_style(btn, code == current_prov)
+        for val, btn in self.scale_buttons.items():
+            self._apply_active_style(btn, abs(float(self.settings.scale) - val) < 0.05)
+        self._apply_active_style(self.top_btn, bool(self.settings.always_on_top))
+        self._apply_active_style(self.motion_btn, bool(self.engine.reduced_motion))
+        self._apply_active_style(self.inbox_btn, bool(self.settings.event_inbox_enabled))
+        self._apply_active_style(self.startup_btn, bool(self.overlay.startup_enabled()))
+
+    def popup_near_anchor(self):
+        self.sync_state()
+        self.ensurePolished()
+        self.adjustSize()
+        rect = self.overlay.frameGeometry()
+        screen = QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
+        target_w = 296
+        target_h = max(290, self.sizeHint().height())
+        if screen:
+            area = screen.availableGeometry()
+            head = anchor_head_rect(self.overlay, rect)
+            bubble_anchor = QRect(head.x(), head.y() - 20, head.width(), head.height())
+            geom, new_side = place_bubble(bubble_anchor, area, target_w, target_h, self.side)
+            self.side = new_side
+            self.setGeometry(geom)
+        else:
+            self.resize(target_w, target_h)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.update()
+
+    def event(self, ev):
+        if ev.type() == QEvent.Type.WindowDeactivate:
+            from PySide6.QtWidgets import QApplication
+            if QApplication.activePopupWidget() is None and not self.pose_combo.view().isVisible():
+                self.hide()
+        return super().event(ev)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
+            if pos.y() <= 38:
+                gpos = event.globalPosition().toPoint() if hasattr(event, 'globalPosition') else event.globalPos()
+                self._drag_offset = gpos - self.frameGeometry().topLeft()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            gpos = event.globalPosition().toPoint() if hasattr(event, 'globalPosition') else event.globalPos()
+            self.move(gpos - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
