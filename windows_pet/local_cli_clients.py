@@ -15,13 +15,15 @@ import threading
 import time
 
 from .chatgpt_client import (
-     Cancelled,
+    Cancelled,
     ChatGPTError,
+    DEFAULT_MAX_REPLY_CHARS,
     PERSONA,
     REASONING_EFFORTS,
     REASONING_REJECTED,
     _check,
     _validate_reasoning_effort,
+    build_persona_instructions,
 )
 
 PROVIDERS = (
@@ -104,13 +106,17 @@ def _terminate_process(proc: subprocess.Popen) -> None:
             pass
 
 
-def _validate_and_format_messages(messages: list[dict]) -> str:
+def _validate_and_format_messages(
+    messages: list[dict],
+    max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS,
+) -> str:
     """Validate conversation history and build a plain-text prompt."""
     if len(messages) > 100:
         raise ChatGPTError("대화가 너무 깁니다. 새 대화를 시작하세요.")
     input_chars = 0
+    persona_text = build_persona_instructions(max_reply_chars)
     lines = [
-        f"[시스템 지침]\n{PERSONA}\n도구나 파일 작업, 명령 실행 없이 오직 대화 답변 텍스트만 출력하세요.",
+        f"[시스템 지침]\n{persona_text}\n도구나 파일 작업, 명령 실행 없이 오직 대화 답변 텍스트만 출력하세요.",
         "[대화 기록]",
     ]
     for message in messages:
@@ -127,7 +133,16 @@ def _validate_and_format_messages(messages: list[dict]) -> str:
         role = message["role"]
         speaker = "시스템" if role == "developer" else ("사용자" if role == "user" else "후부키")
         lines.append(f"{speaker}: {content}")
-    lines.append("\n위 대화의 마지막 사용자 발화에 대해 후부키로서 자연스럽고 간결하게 답하세요 (기본 언어는 한국어이며, 사용자가 일본어나 영어로 말하면 해당 언어로 답하세요).")
+    if max_reply_chars is not None:
+        lines.append(
+            f"\n위 대화의 마지막 사용자 발화에 대해 후부키로서 공백 포함 {max_reply_chars}자 이내(1~2문장)로 짧고 간결하게 답하세요 "
+            "(기본 언어는 한국어이며, 사용자가 일본어나 영어로 말하면 해당 언어로 답하세요)."
+        )
+    else:
+        lines.append(
+            "\n위 대화의 마지막 사용자 발화에 대해 후부키로서 자연스럽고 친절하게 답하세요 "
+            "(기본 언어는 한국어이며, 사용자가 일본어나 영어로 말하면 해당 언어로 답하세요)."
+        )
     return "\n\n".join(lines)
 
 
@@ -193,6 +208,7 @@ class GeminiCLIClient:
         self._lock = threading.RLock()
         self._connected = False
         self._label = ""
+        self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
 
     def session_info(self):
         with self._lock:
@@ -332,12 +348,14 @@ class GeminiCLIClient:
         if not _is_gemini_model_slug(selected_model) or selected_model not in VALID_GEMINI_CLI_SLUGS:
             raise ChatGPTError("지원하지 않는 Gemini 모델입니다.")
         self._configure_workspace_effort(reasoning_effort)
-        prompt = _validate_and_format_messages(messages)
+        limit = getattr(self, "max_reply_chars", DEFAULT_MAX_REPLY_CHARS)
+        prompt = _validate_and_format_messages(messages, max_reply_chars=limit)
         base_cmd = _find_gemini_cli_command()
+        short_rule = f"공백 포함 {limit}자 이내(1~2문장)로 짧게" if limit is not None else "자연스럽게"
         cmd = [
             *base_cmd,
             "-p",
-            "위 대화 기록의 마지막 사용자 말에 후부키로서 간결하게 답하세요 (기본 한국어, 일본어·영어 질문 시 해당 언어로 응답).",
+            f"위 대화 기록의 마지막 사용자 말에 후부키로서 {short_rule} 답하세요 (기본 한국어, 일본어·영어 질문 시 해당 언어로 응답).",
             "-o",
             "stream-json",
             "--approval-mode",
@@ -445,6 +463,7 @@ class AntigravityGeminiClient:
         self._lock = threading.RLock()
         self._connected = False
         self._label = ""
+        self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
         self._cached_models: list[dict[str, str]] = []
 
     def session_info(self):
@@ -549,7 +568,8 @@ class AntigravityGeminiClient:
                 raise ChatGPTError("먼저 로컬 Antigravity에 연결하세요.")
         if not _is_gemini_model_slug(model):
             raise ChatGPTError("Antigravity에서는 Gemini 모델만 사용할 수 있습니다.")
-        prompt = _validate_and_format_messages(messages)
+        limit = getattr(self, "max_reply_chars", DEFAULT_MAX_REPLY_CHARS)
+        prompt = _validate_and_format_messages(messages, max_reply_chars=limit)
         base_cmd = _find_antigravity_cli_command()
         cmd = [
             *base_cmd,
@@ -661,6 +681,7 @@ class MockLocalCLIClient:
     def __init__(self, provider: str = "gemini", data_dir=None):
         self.provider = provider
         self.connected = False
+        self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
 
     def session_info(self):
         label = "Antigravity Gemini 데모" if self.provider == "antigravity_gemini" else "Gemini CLI 데모"

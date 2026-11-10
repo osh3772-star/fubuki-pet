@@ -54,7 +54,7 @@ class ChatWindow(QWidget):
     provider_changed = Signal(str)
     def __init__(self, data_dir, mock=False, client=None, providers=None):
         super().__init__()
-        from .chatgpt_client import ChatGPTClient, MockChatGPTClient
+        from .chatgpt_client import ChatGPTClient, MockChatGPTClient, DEFAULT_MAX_REPLY_CHARS, REPLY_CHAR_LIMIT_OPTIONS
         from .local_cli_clients import PROVIDERS, GeminiCLIClient, AntigravityGeminiClient, MockLocalCLIClient
         default_chatgpt = client or (MockChatGPTClient(data_dir) if mock else ChatGPTClient(data_dir))
         self.providers = {
@@ -64,6 +64,9 @@ class ChatWindow(QWidget):
         }
         if isinstance(providers, dict):
             self.providers.update(providers)
+        self.max_reply_chars = DEFAULT_MAX_REPLY_CHARS
+        for p in self.providers.values():
+            p.max_reply_chars = self.max_reply_chars
         self.current_provider = 'chatgpt'
         self.client = self.providers[self.current_provider]
         self._provider_models = {k: [] for k in self.providers}
@@ -135,6 +138,17 @@ class ChatWindow(QWidget):
         self.reasoning_note.setWordWrap(True)
         layout.addWidget(self.reasoning_note)
         self.reasoning_effort.setToolTip(self.reasoning_note.text())
+        limit_row = QHBoxLayout()
+        limit_label = QLabel('답변 길이 제한')
+        self.reply_limit_selector = QComboBox()
+        self.reply_limit_selector.setAccessibleName('답변 길이 제한')
+        limit_label.setBuddy(self.reply_limit_selector)
+        for label, value in REPLY_CHAR_LIMIT_OPTIONS:
+            self.reply_limit_selector.addItem(label, value)
+        self.reply_limit_selector.currentIndexChanged.connect(self._on_reply_limit_changed)
+        limit_row.addWidget(limit_label)
+        limit_row.addWidget(self.reply_limit_selector, 1)
+        layout.addLayout(limit_row)
         self.models.currentIndexChanged.connect(self.on_model_changed)
         self.notice = QLabel(PROVIDER_NOTICES['chatgpt'])
         self.notice.setWordWrap(True)
@@ -196,6 +210,11 @@ class ChatWindow(QWidget):
         code = self.provider_selector.currentData()
         if code:
             self.select_provider(code)
+    def _on_reply_limit_changed(self):
+        self.max_reply_chars = self.reply_limit_selector.currentData()
+        for p in self.providers.values():
+            p.max_reply_chars = self.max_reply_chars
+        self.render()
     def _restore_provider_models(self, provider_code: str):
         saved_models = self._provider_models.get(provider_code, [])
         selected = self._provider_selected_model.get(provider_code)
@@ -228,6 +247,8 @@ class ChatWindow(QWidget):
         self.refresh_button.setEnabled(connected and not busy)
         self.logout_button.setEnabled(bool(info.get('connected')) and not busy)
         self.models.setEnabled(not busy)
+        if hasattr(self, 'reply_limit_selector'):
+            self.reply_limit_selector.setEnabled(not busy)
         self.reasoning_effort.setEnabled(connected and self.models.count() > 0 and not busy)
         self.send_button.setEnabled(connected and self.models.count() > 0 and not busy)
         self.input.setEnabled(True)

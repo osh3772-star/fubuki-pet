@@ -16,7 +16,13 @@ from PySide6.QtWidgets import QApplication
 
 from windows_pet.chat_bubble import BubbleChat
 from windows_pet.chat_window import ChatWindow
-from windows_pet.chatgpt_client import ChatGPTError, Cancelled, PERSONA, REASONING_REJECTED
+from windows_pet.chatgpt_client import (
+    ChatGPTError,
+    Cancelled,
+    DEFAULT_MAX_REPLY_CHARS,
+    PERSONA,
+    REASONING_REJECTED,
+)
 from windows_pet.local_cli_clients import (
     AntigravityGeminiClient,
     GeminiCLIClient,
@@ -347,6 +353,53 @@ class MultiProviderUITests(unittest.TestCase):
             for _ in range(10):
                 self.window.follow_anchor()
             update_mock.assert_not_called()
+
+    def test_compact_speech_bubble_vs_expand_full_history_and_default_char_limit(self):
+        # Default character limit is 80 chars for concise AI answers
+        self.assertEqual(self.window.max_reply_chars, DEFAULT_MAX_REPLY_CHARS)
+        self.assertEqual(DEFAULT_MAX_REPLY_CHARS, 80)
+        self.assertIn("80자 이내", PERSONA)
+
+        long_answer = "후부키의 긴 답변입니다. " * 10
+        self.window.history = [
+            {"role": "user", "content": "첫 번째 질문"},
+            {"role": "assistant", "content": "첫 번째 대답"},
+            {"role": "user", "content": "방금 내가 한 말"},
+            {"role": "assistant", "content": long_answer},
+        ]
+        self.window.open_bubble()
+        self.window.render()
+        self.window.follow_anchor(force=True)
+        self.app.processEvents()
+
+        # In default compact mode: shows current user utterance, hides old turns, and truncates long reply
+        compact_text = self.window.transcript.toPlainText()
+        self.assertFalse(self.window.expanded)
+        self.assertEqual(self.window.expand_button.text(), "펼치기")
+        self.assertIn("💬 나: 방금 내가 한 말", compact_text)
+        self.assertNotIn("첫 번째 질문", compact_text)
+        self.assertIn("[펼치기에서 전체 보기]", compact_text)
+        self.assertEqual(self.window.transcript.verticalScrollBar().value(), 0)
+        self.assertEqual(self.window.bubble.width(), 286)
+
+        # Clicking '펼치기' expands the bubble and shows the entire history and full untruncated text
+        self.window.expand_button.click()
+        self.app.processEvents()
+        expanded_text = self.window.transcript.toPlainText()
+        self.assertTrue(self.window.expanded)
+        self.assertEqual(self.window.expand_button.text(), "접기")
+        self.assertIn("나: 첫 번째 질문", expanded_text)
+        self.assertIn("후부키: 첫 번째 대답", expanded_text)
+        self.assertIn("나: 방금 내가 한 말", expanded_text)
+        self.assertIn(long_answer, expanded_text)
+        self.assertEqual(self.window.bubble.width(), 360)
+
+        # Clicking '접기' returns to compact speech-bubble mode
+        self.window.expand_button.click()
+        self.app.processEvents()
+        self.assertFalse(self.window.expanded)
+        self.assertEqual(self.window.expand_button.text(), "펼치기")
+        self.assertEqual(self.window.bubble.width(), 286)
 
 
 if __name__ == "__main__":

@@ -128,6 +128,8 @@ class BubbleChat(ChatWindow):
     def __init__(self,data_dir,mock=False,client=None,anchor=None,providers=None):
         self.loaded_font_families=load_chat_fonts()
         self.bubble_provider=None
+        self.expanded=False
+        self.expand_button=None
         super().__init__(data_dir,mock,client,providers=providers)
         self.anchor=anchor;self.side='right'
         self.setWindowTitle('후부키 계정 · 모델 설정')
@@ -139,23 +141,33 @@ class BubbleChat(ChatWindow):
         self.bubble.setObjectName('fubukiBubble')
         self.bubble.setStyleSheet(SKY_THEME)
         self._last_follow_state=None
-        box=QVBoxLayout(self.bubble);box.setContentsMargins(22,10,22,10);box.setSpacing(5)
-        head=QHBoxLayout();head.setSpacing(4)
+        box=QVBoxLayout(self.bubble);box.setContentsMargins(16,10,16,10);box.setSpacing(5)
+        head=QHBoxLayout();head.setSpacing(2)
         speaker=QLabel('후부키');speaker.setObjectName('speaker');head.addWidget(speaker)
         self.bubble_provider=QComboBox()
         self.bubble_provider.setAccessibleName('Bubble provider selector')
         self.bubble_provider.setToolTip('대화 공급자 선택 (ChatGPT · Gemini · Antigravity Gemini)')
         for label,code in (('ChatGPT','chatgpt'),('Gemini','gemini'),('Antigravity','antigravity_gemini')):
             self.bubble_provider.addItem(label,code)
-        self.bubble_provider.setFixedSize(86,22)
+        self.bubble_provider.setFixedSize(64,22)
         self._sync_bubble_provider(self.current_provider)
         self.bubble_provider.currentIndexChanged.connect(self._on_bubble_provider_changed)
         self.provider_changed.connect(self._sync_bubble_provider)
         head.addWidget(self.bubble_provider)
         head.addStretch()
-        self.new_button.setText('새 대화');self.new_button.setToolTip('새 대화 시작');head.addWidget(self.new_button)
-        settings=QPushButton('⋯');settings.setFixedSize(24,24);settings.setAccessibleName('Chat settings');settings.clicked.connect(self.open_settings);head.addWidget(settings)
-        close=QPushButton('−');close.setFixedSize(24,24);close.setAccessibleName('Fold Fubuki chat');close.clicked.connect(self.fold_bubble);head.addWidget(close);box.addLayout(head)
+        self.expand_button=QPushButton('펼치기')
+        self.expand_button.setAccessibleName('Toggle full conversation')
+        self.expand_button.setToolTip('전체 대화 내용 펼치기 / 접기')
+        self.expand_button.setFixedSize(40,22)
+        self.expand_button.setStyleSheet('padding: 1px 2px; font-size: 11px;')
+        self.expand_button.clicked.connect(self.toggle_expand)
+        head.addWidget(self.expand_button)
+        self.new_button.setText('새 대화');self.new_button.setToolTip('새 대화 시작')
+        self.new_button.setFixedSize(44,22)
+        self.new_button.setStyleSheet('padding: 1px 2px; font-size: 11px;')
+        head.addWidget(self.new_button)
+        settings=QPushButton('⋯');settings.setFixedSize(22,22);settings.setAccessibleName('Chat settings');settings.clicked.connect(self.open_settings);head.addWidget(settings)
+        close=QPushButton('−');close.setFixedSize(22,22);close.setAccessibleName('Fold Fubuki chat');close.clicked.connect(self.fold_bubble);head.addWidget(close);box.addLayout(head)
         self.status.setObjectName('status');self.status.setMaximumHeight(30);box.addWidget(self.status)
         box.addWidget(self.transcript)
         self.transcript.setAccessibleName('Fubuki conversation')
@@ -193,6 +205,39 @@ class BubbleChat(ChatWindow):
         super().refresh_controls()
         if getattr(self,'bubble_provider',None) is not None:
             self.bubble_provider.setEnabled(self.worker is None)
+    def toggle_expand(self):
+        self.expanded=not self.expanded
+        if self.expand_button is not None:
+            self.expand_button.setText('접기' if self.expanded else '펼치기')
+        self.render()
+        self.follow_anchor(force=True)
+    def _compact_reply_text(self,text:str)->str:
+        limit=getattr(self,'max_reply_chars',80) or 90
+        if len(text)<=limit:
+            return text
+        return text[:limit].rstrip()+'… [펼치기에서 전체 보기]'
+    def render(self,footer=''):
+        if getattr(self,'expanded',False):
+            super().render(footer)
+            return
+        lines=[]
+        if self.pending_user:
+            lines.append('💬 나: '+self.pending_user)
+            lines.append('후부키: '+self._compact_reply_text(self.current_text))
+        elif self.history:
+            last=self.history[-1]
+            if last['role']=='assistant':
+                if len(self.history)>=2 and self.history[-2]['role']=='user':
+                    lines.append('💬 나: '+self.history[-2]['content'])
+                lines.append('후부키: '+self._compact_reply_text(last['content']))
+            else:
+                lines.append('💬 나: '+last['content'])
+        if footer:
+            lines.append(footer)
+        self.transcript.setPlainText('\n'.join(lines))
+        # Keep the user's own utterance visible at the top of the compact speech bubble.
+        self.transcript.verticalScrollBar().setValue(0)
+        self._transcript_rev=getattr(self,'_transcript_rev',0)+1
     def open_bubble(self):
         self.bubble.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating,False)
         self.follow_anchor(force=True);self.launch_button.hide();self.bubble.show();self.follow_anchor(force=True);self.bubble.raise_()
@@ -209,11 +254,13 @@ class BubbleChat(ChatWindow):
         area=screen.availableGeometry()
         head=anchor_head_rect(self.anchor,rect)
         bubble_visible=self.bubble.isVisible()
+        is_expanded=bool(getattr(self,'expanded',False))
         vp_width=max(1,self.transcript.viewport().width())
         state_key=(
             head.x(),head.y(),head.width(),head.height(),
             area.x(),area.y(),area.width(),area.height(),
             bubble_visible,
+            is_expanded,
             vp_width,
             self.input.height(),
             getattr(self,'_transcript_rev',0),
@@ -229,12 +276,15 @@ class BubbleChat(ChatWindow):
             self.launch_button.setVisible(not bubble_visible)
         if int(self.transcript.document().textWidth())!=vp_width:
             self.transcript.document().setTextWidth(vp_width)
-        reply_height=max(56,min(96,int(self.transcript.document().size().height())+12))
+        min_h,max_h=(140,240) if is_expanded else (56,96)
+        self.transcript.setMinimumHeight(min_h);self.transcript.setMaximumHeight(max_h)
+        reply_height=max(min_h,min(max_h,int(self.transcript.document().size().height())+12))
         if self.transcript.height()!=reply_height:
             self.transcript.setFixedHeight(reply_height)
         height=self.bubble.sizeHint().height()
+        target_width=360 if is_expanded else 286
         bubble_anchor=QRect(head.x(),head.y()-40,head.width(),head.height())
-        geometry,new_side=place_bubble(bubble_anchor,area,286,height,self.side)
+        geometry,new_side=place_bubble(bubble_anchor,area,target_width,height,self.side)
         side_changed=(new_side!=self.side or self.bubble.side!=new_side)
         self.side=new_side;self.bubble.side=new_side
         if self.bubble.geometry()!=geometry:

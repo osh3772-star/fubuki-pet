@@ -31,10 +31,33 @@ JWKS = ISSUER + "/.well-known/jwks.json"
 RESOURCE = "https://api.openai.com/v1"
 SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 DIRECT = "chatgpt.tokens.use.direct"
+DEFAULT_MAX_REPLY_CHARS = 80
+REPLY_CHAR_LIMIT_OPTIONS = (
+    ("짧게 · 80자 이내 (말풍선 기본값)", 80),
+    ("보통 · 150자 이내", 150),
+    ("제한 없음 (길게 대답)", None),
+)
 PERSONA = ("기본 언어는 한국어(한글)로 친근한 데스크톱 반려 친구처럼 답하세요. "
            "사용자가 일본어나 영어로 말하면 해당 언어(한국어·일본어·영어)에 맞춰 자연스럽게 답하세요. "
-           "보통 1~3문장으로 간결하게 답하세요. "
+           "말풍선에 한눈에 들어오도록 기본적으로 공백 포함 80자 이내(1~2문장)로 짧고 간결하게 핵심만 답하세요. "
            "실제 인물이나 공식 캐릭터라고 주장하지 마세요. 도구 실행이나 컴퓨터 작업을 수행했다고 주장하지 마세요.")
+
+
+def build_persona_instructions(max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS) -> str:
+    if max_reply_chars is None:
+        return (
+            "기본 언어는 한국어(한글)로 친근한 데스크톱 반려 친구처럼 답하세요. "
+            "사용자가 일본어나 영어로 말하면 해당 언어(한국어·일본어·영어)에 맞춰 자연스럽게 답하세요. "
+            "실제 인물이나 공식 캐릭터라고 주장하지 마세요. 도구 실행이나 컴퓨터 작업을 수행했다고 주장하지 마세요."
+        )
+    if max_reply_chars == DEFAULT_MAX_REPLY_CHARS:
+        return PERSONA
+    return (
+        "기본 언어는 한국어(한글)로 친근한 데스크톱 반려 친구처럼 답하세요. "
+        "사용자가 일본어나 영어로 말하면 해당 언어(한국어·일본어·영어)에 맞춰 자연스럽게 답하세요. "
+        f"말풍선에 들어오도록 공백 포함 {max_reply_chars}자 이내로 간결하게 핵심만 답하세요. "
+        "실제 인물이나 공식 캐릭터라고 주장하지 마세요. 도구 실행이나 컴퓨터 작업을 수행했다고 주장하지 마세요."
+    )
 # Responses API enum, not a promise that a particular account/model supports it.
 # https://developers.openai.com/api/docs/guides/reasoning
 # SIWC's documented /models catalog does not specify effort capabilities.
@@ -103,6 +126,7 @@ class ChatGPTClient:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.data_dir / "chatgpt-session.dpapi"
+        self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
         self._lock = threading.RLock()
         self._http = requests.Session()
         # Do not inherit proxy credentials or .netrc authentication.
@@ -392,7 +416,8 @@ class ChatGPTClient:
             if input_chars > 60000:
                 raise ChatGPTError("대화가 너무 깁니다. 새 대화를 시작하세요.")
             clean.append({"role": message["role"], "content": message["content"]})
-        payload = {"model": model, "input": clean, "instructions": PERSONA,
+        instructions = build_persona_instructions(getattr(self, "max_reply_chars", DEFAULT_MAX_REPLY_CHARS))
+        payload = {"model": model, "input": clean, "instructions": instructions,
                    "store": False, "stream": True}
         if reasoning_effort is not None:
             payload["reasoning"] = {"effort": reasoning_effort}
@@ -481,6 +506,7 @@ class MockChatGPTClient:
     """Explicit offline UI test mode, never touches real credentials or network."""
     def __init__(self, data_dir=None):
         self.connected = False
+        self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
 
     def session_info(self):
         return {"connected": self.connected, "email": "offline-demo@example.invalid" if self.connected else "",
