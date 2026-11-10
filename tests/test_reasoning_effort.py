@@ -187,6 +187,41 @@ class ReasoningUITests(unittest.TestCase):
         self.connect()
         self.assertTrue(self.window.reasoning_effort.isEnabled())
 
+    def test_restored_login_loads_catalog_and_enables_reasoning_without_signin(self):
+        self.client.connected = True
+        # Simulate the persisted session present when the window is created.
+        with patch.object(self.client, 'sign_in', side_effect=AssertionError('unexpected login')):
+            with patch.object(self.client, 'list_models', wraps=self.client.list_models) as catalog:
+                self.app.processEvents()
+                self.wait()
+                self.assertEqual(self.window.models.currentData(), 'mock')
+                self.assertTrue(self.window.reasoning_effort.isEnabled())
+                self.select('high')
+                self.window._load_connected_models()
+                self.assertEqual(catalog.call_count, 1)
+                self.assertEqual(self.window.reasoning_effort.currentData(), 'high')
+        self.assertEqual(self.client.calls, 0)
+
+    def test_switch_to_restored_provider_loads_missing_catalog(self):
+        self.app.processEvents()  # Finish the initial disconnected startup.
+        self.window.select_provider('gemini')
+        self.client.connected = True
+        self.window.select_provider('chatgpt')
+        self.wait()
+        self.assertEqual(self.window.models.currentData(), 'mock')
+        self.assertTrue(self.window.reasoning_effort.isEnabled())
+        self.assertEqual(self.client.calls, 0)
+
+    def test_catalog_failure_is_not_retried_automatically(self):
+        self.client.connected = True
+        with patch.object(self.client, 'list_models', side_effect=ChatGPTError('catalog unavailable')) as catalog:
+            self.app.processEvents()
+            self.wait()
+            self.app.processEvents()
+            self.assertEqual(catalog.call_count, 1)
+            self.assertFalse(self.window.reasoning_effort.isEnabled())
+            self.assertIn('catalog unavailable', self.window.status.text())
+
     def test_selected_value_used_busy_controls_locked_and_repeat_send_ignored(self):
         self.connect()
         self.select('xhigh')

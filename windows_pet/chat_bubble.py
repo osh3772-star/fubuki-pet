@@ -1,5 +1,5 @@
 """Character-anchored chat. The existing ChatWindow owns all auth and workers."""
-from PySide6.QtCore import Qt, QTimer, Signal, QRect, QEvent, QPoint
+from PySide6.QtCore import Qt, QTimer, Signal, QRect, QEvent, QPoint, QRectF
 from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut, QPainter, QPainterPath, QColor, QPen, QFontDatabase, QTextCursor, QTextBlockFormat
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QPlainTextEdit, QLabel, QComboBox
 from .chat_window import ChatWindow
@@ -36,6 +36,10 @@ QPlainTextEdit:focus { border: 2px solid #3685AE; background: #F7FCFF; }
 QComboBox { background: #EAF5FC; border: 1px solid #CAE2F0; border-radius: 8px; padding: 2px 6px; color: #203E55; font-size: 11px; min-height: 20px; }
 QComboBox:hover { background: #D6EEFC; border-color: #76B6D7; }
 QComboBox:disabled { color: #758692; background: #EDF1F4; border-color: #DCE4E9; }
+QComboBox#bubbleProvider { border-radius: 12px; padding: 2px 30px 2px 10px; min-height: 0px; }
+QComboBox#bubbleProvider::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 25px; border: 0px; border-radius: 11px; background: #D9EFFB; margin: 1px; }
+QComboBox#bubbleProvider::down-arrow { image: none; width: 0px; height: 0px; }
+QTextEdit#bubbleTranscript { background: transparent; border: none; border-radius: 0px; padding: 8px 10px; }
 QPushButton { background: #EAF5FC; border: 1px solid #CAE2F0; border-radius: 10px; padding: 3px 6px; color: #31596E; }
 QPushButton:hover { background: #D6EEFC; border-color: #76B6D7; }
 QPushButton:focus { border: 2px solid #3685AE; }
@@ -51,7 +55,7 @@ QMenu::item { padding: 5px 18px 5px 12px; border-radius: 7px; background: transp
 QMenu::item:selected { background: #D6EEFC; color: #183E59; font-weight: 600; }
 QMenu::item:disabled { color: #758692; }
 QMenu::separator { height: 1px; background: #D5EAF7; margin: 4px 6px; }
-QScrollBar:vertical { background: transparent; width: 7px; margin: 2px; }
+QScrollBar:vertical { background: transparent; width: 12px; margin: 6px 3px; }
 QScrollBar::handle:vertical { background: #A9CCDF; border-radius: 3px; min-height: 24px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 """
@@ -78,16 +82,22 @@ class SnowBubble(QWidget):
         if pos.x()>=w-16 and pos.y()>36:edges+='r'
         elif pos.x()<=16 and pos.y()>36:edges+='l'
         return edges
+    def speech_body_rect(self):
+        if self.owner is not None and hasattr(self.owner, 'transcript'):
+            return QRectF(self.owner.transcript.geometry()).adjusted(-3, -2, 3, 2)
+        return QRectF(12, 3, self.width()-24, self.height()-7)
     def paintEvent(self,event):
         w,h,side=self.width(),self.height(),self.side
-        key=(w,h,side)
+        rect=self.speech_body_rect()
+        key=(w,h,side,rect.x(),rect.y(),rect.width(),rect.height())
         if self._path_cache_key!=key or self._cached_path is None:
-            body=QPainterPath();body.addRoundedRect(12,3,w-24,h-7,22,22)
+            body=QPainterPath();body.addRoundedRect(rect,18,18)
             tail=QPainterPath()
+            tail_y=min(rect.bottom()-18,rect.top()+28)
             if side=='right':
-                tail.moveTo(13,55);tail.lineTo(2,65);tail.lineTo(13,75)
+                tail.moveTo(rect.left()+1,tail_y-8);tail.lineTo(rect.left()-10,tail_y);tail.lineTo(rect.left()+1,tail_y+8)
             else:
-                tail.moveTo(w-13,55);tail.lineTo(w-2,65);tail.lineTo(w-13,75)
+                tail.moveTo(rect.right()-1,tail_y-8);tail.lineTo(rect.right()+10,tail_y);tail.lineTo(rect.right()-1,tail_y+8)
             tail.closeSubpath()
             self._cached_path=body.united(tail)
             self._path_cache_key=key
@@ -163,7 +173,8 @@ class BubbleInput(QPlainTextEdit):
         self.document().setDocumentMargin(0)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setAccessibleName('Message to Fubuki')
-        self.setPlaceholderText('후부키에게 말 걸기…')
+        self._idle_placeholder='フブキ에게 말 걸기…'
+        self.setPlaceholderText(self._idle_placeholder)
         self.textChanged.connect(self.fit_height)
         self.fit_height()
     def fit_height(self):
@@ -179,7 +190,11 @@ class BubbleInput(QPlainTextEdit):
             QTimer.singleShot(0,self.fit_height)
     def inputMethodEvent(self, event):
         self.composing = bool(event.preeditString())
+        # Qt considers the document empty until IME commit. Hide its placeholder
+        # during preedit too, otherwise it is painted underneath Korean input.
+        self.setPlaceholderText('' if self.composing else self._idle_placeholder)
         super().inputMethodEvent(event)
+        self.viewport().update()
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             if not self.composing: self.submit.emit()
@@ -223,6 +238,28 @@ def place_launcher(head,area,width=48,height=26):
     return QRect(max(area.left(),min(x,area.right()-width+1)),max(area.top(),min(y,area.bottom()-height+1)),width,height)
 
 
+class ProviderComboBox(QComboBox):
+    """Rounded arrow with no native square Windows drop-down subcontrol."""
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor('#3685AE' if self.hasFocus() else '#CAE2F0'),1.5))
+        painter.setBrush(QColor('#EAF5FC' if self.isEnabled() else '#EDF1F4'))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(1,1,-1,-1),12,12)
+        arrow=QRectF(self.width()-26,3,22,self.height()-6)
+        painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor('#D9EFFB'))
+        painter.drawRoundedRect(arrow,9,9)
+        painter.setPen(QColor('#203E55' if self.isEnabled() else '#758692'))
+        text_rect=self.rect().adjusted(10,0,-29,0)
+        label=self.fontMetrics().elidedText(self.currentText(),Qt.TextElideMode.ElideRight,text_rect.width())
+        painter.drawText(text_rect,Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,label)
+        center=arrow.center()
+        pen=QPen(QColor('#49718A' if self.isEnabled() else '#91A7B4'),1.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap);pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        path=QPainterPath();path.moveTo(center.x()-3,center.y()-1);path.lineTo(center.x(),center.y()+2);path.lineTo(center.x()+3,center.y()-1)
+        painter.drawPath(path)
+
+
 class BubbleChat(ChatWindow):
     def __init__(self,data_dir,mock=False,client=None,anchor=None,providers=None):
         self.loaded_font_families=load_chat_fonts()
@@ -237,7 +274,7 @@ class BubbleChat(ChatWindow):
         self.custom_offset=None
         super().__init__(data_dir,mock,client,providers=providers)
         self.anchor=anchor;self.side='right';self._drag_offset=None
-        self.setWindowTitle('후부키 계정 · 모델 설정')
+        self.setWindowTitle('フブキ 계정 · 모델 설정')
         settings_flags=(Qt.WindowType.Window if mock else Qt.WindowType.Tool)|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(settings_flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -249,24 +286,31 @@ class BubbleChat(ChatWindow):
         if mock:
             # Keep offline validation discoverable by native accessibility tools.
             self.bubble.setWindowFlags(Qt.WindowType.Window|Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint)
-        self.bubble.setWindowTitle('후부키 말풍선')
+        self.bubble.setWindowTitle('フブキ 말풍선')
         self.bubble.setObjectName('fubukiBubble')
         self.bubble.setStyleSheet(SKY_THEME)
         self._last_follow_state=None
-        box=QVBoxLayout(self.bubble);box.setContentsMargins(16,10,16,12);box.setSpacing(6)
-        head=QHBoxLayout();head.setSpacing(3)
-        speaker=QLabel('후부키');speaker.setObjectName('speaker');head.addWidget(speaker)
-        self.bubble_provider=QComboBox()
+        box=QVBoxLayout(self.bubble);box.setContentsMargins(18,8,18,10);box.setSpacing(7)
+        title_row=QHBoxLayout();title_row.setContentsMargins(8,0,4,0)
+        self.speaker=QLabel('フブキ');self.speaker.setObjectName('speaker')
+        self.speaker.setStyleSheet('background: #F8FCFF; border-radius: 8px; padding: 2px 8px;')
+        title_row.addWidget(self.speaker)
+        title_row.addStretch()
+        close=QPushButton('−');close.setFixedSize(24,24);close.setAccessibleName('Fold Fubuki chat');close.clicked.connect(self.fold_bubble);title_row.addWidget(close)
+        box.addLayout(title_row)
+        head=QHBoxLayout();head.setSpacing(5)
+        self.bubble_provider=ProviderComboBox()
+        self.bubble_provider.setObjectName('bubbleProvider')
         self.bubble_provider.setAccessibleName('Bubble provider selector')
         self.bubble_provider.setToolTip('대화 공급자 선택 (ChatGPT · Gemini · Antigravity Gemini)')
         for label,code in (('ChatGPT','chatgpt'),('Gemini','gemini'),('Antigravity','antigravity_gemini')):
             self.bubble_provider.addItem(label,code)
-        self.bubble_provider.setFixedSize(72,22)
+        self.bubble_provider.setFixedSize(94,26)
+        self.bubble_provider.view().setMinimumWidth(150)
         self._sync_bubble_provider(self.current_provider)
         self.bubble_provider.currentIndexChanged.connect(self._on_bubble_provider_changed)
         self.provider_changed.connect(self._sync_bubble_provider)
         head.addWidget(self.bubble_provider)
-        head.addStretch()
         self.font_down_button=QPushButton('가−')
         self.font_down_button.setAccessibleName('Decrease chat font size')
         self.font_down_button.setToolTip('글자 크기 작게 (창 상단 더블클릭 시 크기·위치 초기화)')
@@ -293,13 +337,16 @@ class BubbleChat(ChatWindow):
         self.new_button.setStyleSheet('padding: 1px 2px; font-size: 11px;')
         head.addWidget(self.new_button)
         settings=QPushButton('⋯');settings.setFixedSize(22,22);settings.setAccessibleName('Chat settings');settings.clicked.connect(self.open_settings);head.addWidget(settings)
-        close=QPushButton('−');close.setFixedSize(22,22);close.setAccessibleName('Fold Fubuki chat');close.clicked.connect(self.fold_bubble);head.addWidget(close);box.addLayout(head)
+        head.addStretch();box.addLayout(head)
         self.status.setObjectName('status');self.status.setWordWrap(False);self.status.setMinimumWidth(40);self.status.setFixedHeight(20);box.addWidget(self.status)
         box.addWidget(self.transcript)
+        self.transcript.setObjectName('bubbleTranscript')
         self.transcript.setAccessibleName('Fubuki conversation')
         self.transcript.document().setDocumentMargin(6)
         self.transcript.setMinimumHeight(68);self.transcript.setMaximumHeight(132)
         self.transcript.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Always reserve the gutter so the line width never changes under text.
+        self.transcript.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.input.hide();self.input.deleteLater();self.input=BubbleInput();self.input.submit.connect(self.send)
         self.send_button.setObjectName('send');self.send_button.setText('↑');self.send_button.setAccessibleName('Send message');self.send_button.setFixedSize(30,32)
         self.stop_button.setText('■');self.stop_button.setAccessibleName('Stop response');self.stop_button.setFixedSize(28,32)
@@ -427,7 +474,7 @@ class BubbleChat(ChatWindow):
         self.bubble.hide();self.follow_anchor(force=True);self.launch_button.show()
     def open_settings(self):
         self.ensurePolished();self.adjustSize()
-        target_w=340;target_h=max(320,self.sizeHint().height())
+        target_w=max(340,self.minimumSizeHint().width(),self.sizeHint().width());target_h=max(320,self.sizeHint().height())
         base=self.bubble.geometry() if self.bubble.isVisible() else (self.anchor.frameGeometry() if self.anchor else QRect(500,360,160,180))
         screen=QGuiApplication.screenAt(base.center()) or QGuiApplication.primaryScreen()
         if screen:
@@ -472,9 +519,12 @@ class BubbleChat(ChatWindow):
             self._last_head_rect=QRect(head)
         is_expanded=bool(getattr(self,'expanded',False))
         target_width=self.custom_width if self.custom_width is not None else (440 if is_expanded else 350)
-        est_vp_width=max(120,target_width-52)
-        if int(self.transcript.document().textWidth())!=est_vp_width:
-            self.transcript.document().setTextWidth(est_vp_width)
+        # QTextEdit owns document wrapping. Estimating a wider document than its
+        # actual viewport clips the final glyphs behind the scroll bar.
+        if self.bubble.width()!=target_width:
+            self.bubble.resize(target_width,self.bubble.height())
+        self.bubble.layout().activate()
+        est_vp_width=self.transcript.viewport().width()
         doc_h=int(self.transcript.document().size().height())
         state_key=(
             head.x(),head.y(),head.width(),head.height(),
@@ -500,7 +550,7 @@ class BubbleChat(ChatWindow):
         if self.launch_button.isVisible()==bubble_visible:
             self.launch_button.setVisible(not bubble_visible)
         if self.custom_height is not None:
-            overhead=max(120,self.input.height()+86)
+            overhead=self.bubble.layout().sizeHint().height()-self.transcript.height()
             reply_height=max(56,min(480,self.custom_height-overhead))
             min_h,max_h=56,480
         else:

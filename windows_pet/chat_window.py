@@ -1,7 +1,7 @@
 """Subscription & local official CLI Qt chat; no API keys or unauthorized scraping."""
 from __future__ import annotations
 import threading
-from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtCore import QThread, QTimer, Signal, Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QTextEdit, QPlainTextEdit, QMessageBox
 
 
@@ -111,7 +111,7 @@ class ChatWindow(QWidget):
         self.pending_user = ''
         self.operation = ''
         self._effort_model = None
-        self.setWindowTitle('후부키 · 구독 및 로컬 CLI 채팅' + (' [모의 테스트]' if mock else ' [시험본]'))
+        self.setWindowTitle('フブキ · 구독 및 로컬 CLI 채팅' + (' [모의 테스트]' if mock else ' [시험본]'))
         self.setObjectName('fubukiSettings')
         self.resize(340, 390)
         layout = QVBoxLayout(self)
@@ -119,7 +119,7 @@ class ChatWindow(QWidget):
         layout.setSpacing(6)
         self.settings_header = QHBoxLayout()
         self.settings_header.setSpacing(4)
-        self.settings_title = QLabel('후부키 설정')
+        self.settings_title = QLabel('フブキ 설정')
         self.settings_title.setObjectName('speaker')
         self.settings_header.addWidget(self.settings_title)
         self.settings_header.addStretch()
@@ -218,7 +218,7 @@ class ChatWindow(QWidget):
         self.transcript.setReadOnly(True)
         chat_box_layout.addWidget(self.transcript, 1)
         self.input = QPlainTextEdit()
-        self.input.setPlaceholderText('후부키에게 짧게 말해 주세요…')
+        self.input.setPlaceholderText('フブキ에게 짧게 말해 주세요…')
         self.input.setMaximumHeight(85)
         chat_box_layout.addWidget(self.input)
         row = QHBoxLayout()
@@ -248,6 +248,15 @@ class ChatWindow(QWidget):
             self._restore_provider_models(self.current_provider)
             self._effort_model = self.models.currentData()
         self.refresh_controls()
+        # A restored login does not emit the sign-in completion signal. Load its
+        # authorized catalog after construction (including BubbleChat's setup).
+        QTimer.singleShot(0, self._load_connected_models)
+    def _load_connected_models(self):
+        if self.worker is not None or self.models.count():
+            return
+        info = self.client.session_info()
+        if info.get('connected') and info.get('sharing'):
+            self.refresh_models()
     def select_provider(self, provider_code: str):
         if self.worker is not None or provider_code not in self.providers:
             return
@@ -268,6 +277,7 @@ class ChatWindow(QWidget):
         self._effort_model = self.models.currentData()
         self.refresh_controls()
         self.provider_changed.emit(provider_code)
+        self._load_connected_models()
     def _on_provider_combo_changed(self):
         code = self.provider_selector.currentData()
         if code:
@@ -349,7 +359,7 @@ class ChatWindow(QWidget):
             if self.current_provider in ('gemini', 'antigravity_gemini')
             else '브라우저 로그인 대기 중…'
         )
-        self.status.setText({'signin':signin_text, 'models':'사용 가능한 모델 확인 중…', 'chat':'후부키가 생각 중…', 'logout':'연결 해제 중…'}[name])
+        self.status.setText({'signin':signin_text, 'models':'사용 가능한 모델 확인 중…', 'chat':'フブキ가 생각 중…', 'logout':'연결 해제 중…'}[name])
         if hasattr(self, 'settings_status'):
             self.settings_status.setText(self.status.text())
         self.worker.start()
@@ -401,10 +411,10 @@ class ChatWindow(QWidget):
         # Plain text rendering prevents model-supplied HTML and links from executing.
         lines=[]
         for item in self.history:
-            lines.append(('나: ' if item['role']=='user' else '후부키: ') + item['content'])
+            lines.append(('나: ' if item['role']=='user' else 'フブキ: ') + item['content'])
         if self.pending_user:
             typing_text = (self.current_text + '▍') if (self.current_text and not footer) else (self.current_text or ('…' if not footer else ''))
-            lines += ['나: '+self.pending_user, '후부키: '+typing_text]
+            lines += ['나: '+self.pending_user, 'フブキ: '+typing_text]
         if footer: lines.append(footer)
         text = '\n\n'.join(lines)
         if getattr(self, '_last_rendered_text', None) != text:
