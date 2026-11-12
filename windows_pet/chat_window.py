@@ -6,6 +6,14 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBu
 from .ui_controls import RoundedComboBox as QComboBox
 
 
+REASONING_CHOICES = (
+    ('기본값 (강도 미지정)', None), ('없음 · none', 'none'),
+    ('최소 · minimal', 'minimal'), ('낮음 · low', 'low'),
+    ('보통 · medium', 'medium'), ('높음 · high', 'high'),
+    ('매우 높음 · xhigh', 'xhigh'), ('최대 · max', 'max'),
+)
+
+
 PROVIDER_CONNECT_LABELS = {
     'chatgpt': 'Continue with ChatGPT',
     'gemini': '로컬 Gemini CLI 연결',
@@ -183,12 +191,7 @@ class ChatWindow(QWidget):
         self.reasoning_effort = QComboBox()
         self.reasoning_effort.setAccessibleName('추론 강도')
         effort_label.setBuddy(self.reasoning_effort)
-        for label, value in (
-                ('서버 기본값 (권장)', None), ('없음 · none', 'none'),
-                ('최소 · minimal', 'minimal'), ('낮음 · low', 'low'),
-                ('보통 · medium', 'medium'), ('높음 · high', 'high'),
-                ('매우 높음 · xhigh', 'xhigh'), ('최대 · max', 'max')):
-            self.reasoning_effort.addItem(label, value)
+        self.reasoning_effort.addItem(*REASONING_CHOICES[0])
         effort_row.addWidget(effort_label)
         effort_row.addWidget(self.reasoning_effort, 1)
         card_layout.addLayout(effort_row)
@@ -205,7 +208,7 @@ class ChatWindow(QWidget):
         limit_row.addWidget(self.reply_limit_selector, 1)
         card_layout.addLayout(limit_row)
         layout.addWidget(self.settings_card)
-        self.reasoning_note = QLabel('모델마다 지원 단계가 다릅니다. 계정 목록에 지원 정보가 없어 직접 선택은 서버에서 확인됩니다.\n높은 강도는 응답 시간과 구독 사용량이 늘 수 있습니다. 기본값은 강도를 지정하지 않습니다.')
+        self.reasoning_note = QLabel()
         self.reasoning_note.setObjectName('captionNote')
         self.reasoning_note.setWordWrap(True)
         layout.addWidget(self.reasoning_note)
@@ -261,7 +264,7 @@ class ChatWindow(QWidget):
             return
         info = self.client.session_info()
         if info.get('connected') and info.get('sharing'):
-            self.refresh_models()
+            self._start_model_load()
     def select_provider(self, provider_code: str):
         if self.worker is not None or provider_code not in self.providers:
             return
@@ -316,17 +319,38 @@ class ChatWindow(QWidget):
                 from .chatgpt_client import ChatGPTError
                 self.status.setText(str(exc) if isinstance(exc, ChatGPTError) else 'CLI 로그인 창을 열지 못했습니다.')
     def _sync_effort_options(self):
-        from .local_cli_clients import GEMINI_CLI_EFFORTS, ANTIGRAVITY_EFFORTS
-        from .claude_cli_client import CLAUDE_EFFORTS
-        supported = {'gemini': GEMINI_CLI_EFFORTS,
-                     'antigravity_gemini': ANTIGRAVITY_EFFORTS,
-                     'claude': CLAUDE_EFFORTS}.get(self.current_provider)
-        for index in range(self.reasoning_effort.count()):
-            value = self.reasoning_effort.itemData(index)
-            enabled = supported is None or value is None or value in supported
-            self.reasoning_effort.model().item(index).setEnabled(enabled)
+        from .chatgpt_client import get_supported_reasoning_efforts
+        capabilities = get_supported_reasoning_efforts(self.client, self.models.currentData())
+        supported = capabilities or ()
+        default_label = ('서버 기본값 (강도 미지정)' if self.current_provider == 'chatgpt'
+                         else 'CLI 기본값 (강도 미지정)')
+        choices = ((default_label, None),) + tuple(
+            (label, value) for label, value in REASONING_CHOICES if value in supported)
+        if self.current_provider == 'chatgpt':
+            note = ('현재 ChatGPT 계정·모델의 추론 강도 지원 정보가 없어 서버 기본값만 사용합니다.'
+                    if capabilities is None else '이 계정·모델에서 지원이 확인된 추론 강도만 표시합니다.')
+            note += "\n서버 기본값은 강도 미지정(reasoning 생략)이며, 'none'(추론 없음)이 아닙니다."
+        else:
+            note = ('선택한 모델의 추론 강도 지원이 확인되지 않아 CLI 기본값만 사용합니다.'
+                    if capabilities is None else '선택한 모델에서 지원이 확인된 추론 강도만 표시합니다.')
+            if self.models.currentData() == 'auto':
+                note = '자동 모델은 실제 사용 모델이 정해지지 않아 CLI 기본값만 사용합니다.'
+            note += "\nCLI 기본값은 추론 강도를 별도로 지정하지 않으며, 'none'(추론 없음) 설정이 아닙니다."
+        if supported:
+            note += ' 높은 강도는 응답 시간과 구독 사용량이 늘 수 있습니다.'
+        self.reasoning_note.setText(note)
+        self.reasoning_effort.setToolTip(note)
         selected = self.reasoning_effort.currentData()
-        if supported is not None and selected is not None and selected not in supported:
+        existing = tuple((self.reasoning_effort.itemText(i), self.reasoning_effort.itemData(i))
+                         for i in range(self.reasoning_effort.count()))
+        if existing != choices:
+            self.reasoning_effort.blockSignals(True)
+            self.reasoning_effort.clear()
+            for label, value in choices:
+                self.reasoning_effort.addItem(label, value)
+            self.reasoning_effort.setCurrentIndex(max(0, self.reasoning_effort.findData(selected)))
+            self.reasoning_effort.blockSignals(False)
+        if selected is not None and selected not in supported:
             self.reasoning_effort.setCurrentIndex(0)
 
     def refresh_controls(self):
@@ -343,7 +367,8 @@ class ChatWindow(QWidget):
         self.models.setEnabled(not busy)
         if hasattr(self, 'reply_limit_selector'):
             self.reply_limit_selector.setEnabled(not busy)
-        self.reasoning_effort.setEnabled(connected and self.models.count() > 0 and not busy)
+        self.reasoning_effort.setEnabled(connected and self.models.count() > 0 and
+                                         self.reasoning_effort.count() > 1 and not busy)
         self.send_button.setEnabled(connected and self.models.count() > 0 and not busy)
         self.input.setEnabled(True)
         self.new_button.setEnabled(not busy)
@@ -402,8 +427,12 @@ class ChatWindow(QWidget):
                 if answer != QMessageBox.StandardButton.Yes: return
         self.start('signin', lambda cancel, delta:self.client.sign_in(cancel))
     def refresh_models(self):
-        # User-visible refresh must ask the CLI, not replay startup cache.
-        options = {'force_refresh': True} if self.current_provider == 'antigravity_gemini' and not self.mock else {}
+        self._start_model_load(force_refresh=True)
+    def _start_model_load(self, *, force_refresh=False):
+        # Explicit refresh reloads verified CLI capabilities. Startup/sign-in
+        # already fetched them, so loading those choices must not probe twice.
+        options = {'force_refresh': True} if (force_refresh and not self.mock and
+                    self.current_provider in ('antigravity_gemini', 'claude')) else {}
         self.start('models', lambda cancel, delta:self.client.list_models(cancel, **options))
     def on_model_changed(self):
         model = self.models.currentData()
@@ -421,13 +450,22 @@ class ChatWindow(QWidget):
         if not text: return
         if len(text) > 4000:
             self.status.setText('한 번에 4,000자 이하로 입력해 주세요.'); return
+        model = self.models.currentData()
+        effort = self.reasoning_effort.currentData()
+        from .chatgpt_client import ChatGPTError, validate_model_reasoning_effort
+        try:
+            validate_model_reasoning_effort(self.client, model, effort)
+        except ChatGPTError as exc:
+            # Reject injected/stale choices without sending or losing the draft.
+            self.refresh_controls()
+            self.status.setText(str(exc))
+            self.settings_status.setText(str(exc))
+            return
         self.pending_user = text
         self.current_text = ''
         self.input.clear()
         self.render()
         messages = self.history[-12:] + [{'role':'user', 'content':text}]
-        model = self.models.currentData()
-        effort = self.reasoning_effort.currentData()
         self.state_changed.emit('thinking')
         options = {} if effort is None else {'reasoning_effort': effort}
         self.start('chat', lambda cancel, delta:self.client.stream_reply(messages, model, delta, cancel, **options))
@@ -492,7 +530,7 @@ class ChatWindow(QWidget):
             self.status.setText(self.last_error); del self.last_error
         elif operation == 'logout': self.status.setText(previous)
         elif operation == 'models' and not self.models.count(): self.status.setText('사용 가능한 모델이 없습니다. 계정 권한을 확인해 주세요.')
-        elif operation == 'signin' and self.client.session_info().get('sharing'): self.refresh_models()
+        elif operation == 'signin' and self.client.session_info().get('sharing'): self._start_model_load()
         if hasattr(self, 'settings_status'):
             self.settings_status.setText(self.status.text())
     def stop(self):

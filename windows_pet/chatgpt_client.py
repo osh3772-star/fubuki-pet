@@ -59,10 +59,11 @@ def build_persona_instructions(max_reply_chars: int | None = DEFAULT_MAX_REPLY_C
         f"말풍선에 들어오도록 공백 포함 {max_reply_chars}자 이내로 간결하게 핵심만 답하세요. "
         "실제 인물이나 공식 캐릭터라고 주장하지 마세요. 도구 실행이나 컴퓨터 작업을 수행했다고 주장하지 마세요."
     )
-# Responses API enum, not a promise that a particular account/model supports it.
-# https://developers.openai.com/api/docs/guides/reasoning
+# Shared UI/client vocabulary, not a model/provider capability allowlist.
 # SIWC's documented /models catalog does not specify effort capabilities.
 REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+REASONING_UNAVAILABLE = ("이 계정·모델에서 지원이 확인되지 않은 추론 강도입니다. "
+                         "'기본값'을 선택하세요. 요청은 전송하지 않았습니다.")
 REASONING_REJECTED = ("선택한 추론 강도를 적용할 수 없습니다. 설정에서 '서버 기본값' 또는 다른 단계를 "
                       "선택한 뒤 다시 보내세요. 요청은 자동 재전송하지 않았습니다.")
 
@@ -79,6 +80,36 @@ def _validate_reasoning_effort(value):
     # None means omission. In particular, the string 'none' is NOT omission.
     if value is not None and (not isinstance(value, str) or value not in REASONING_EFFORTS):
         raise ChatGPTError("올바르지 않은 추론 강도입니다. 설정에서 다시 선택하세요.")
+
+
+def get_supported_reasoning_efforts(client, model):
+    """Read an explicit, local account/model capability hook; fail closed.
+
+    The generic Responses enum and SIWC model names/catalog fields are not
+    capability evidence. A future adapter must return only verified choices
+    for its current account and exact model, or None when support is unknown.
+    The hook must not perform network I/O (the UI also calls it).
+    """
+    hook = getattr(client, "supported_reasoning_efforts", None)
+    if not model or not callable(hook):
+        return None
+    try:
+        values = hook(model)
+    except Exception:
+        return None
+    if not isinstance(values, (tuple, list, set, frozenset)):
+        return None
+    if any(not isinstance(value, str) or value not in REASONING_EFFORTS for value in values):
+        return None
+    return tuple(value for value in REASONING_EFFORTS if value in values)
+
+
+def validate_model_reasoning_effort(client, model, value):
+    _validate_reasoning_effort(value)
+    if value is not None:
+        supported = get_supported_reasoning_efforts(client, model)
+        if supported is None or value not in supported:
+            raise ChatGPTError(REASONING_UNAVAILABLE)
 
 
 def _is_reasoning_error(error):
@@ -402,8 +433,14 @@ class ChatGPTClient:
                 for m in models if isinstance(m, dict) and m.get("visibility") == "list"
                 and isinstance(m.get("slug"), str) and m["slug"]]
 
+    def supported_reasoning_efforts(self, model):
+        # SIWC documents slug/display_name/visibility, not effort capabilities:
+        # https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+        # Unknown is not permission to try every generic Responses enum value.
+        return None
+
     def stream_reply(self, messages, model, on_delta, cancel_event=None, *, reasoning_effort=None):
-        _validate_reasoning_effort(reasoning_effort)
+        validate_model_reasoning_effort(self, model, reasoning_effort)
         token = self._access(cancel_event)
         # Explicit allowlist: no tool definitions, tool calls, files, or arbitrary request fields.
         clean = []
@@ -524,8 +561,12 @@ class MockChatGPTClient:
             raise ChatGPTError("오프라인 데모에 먼저 연결하세요.")
         return [{"slug": "offline-demo", "display_name": "오프라인 데모 (실제 AI 아님)"}]
 
+    def supported_reasoning_efforts(self, model):
+        # The demo mirrors the safe default-only subscription UI.
+        return None
+
     def stream_reply(self, messages, model, on_delta, cancel_event=None, *, reasoning_effort=None):
-        _validate_reasoning_effort(reasoning_effort)
+        validate_model_reasoning_effort(self, model, reasoning_effort)
         self.list_models(cancel_event)
         text = "[오프라인 데모] 안녕하세요! 후부키 채팅 창이 정상 작동하고 있어요. 실제 ChatGPT 연결은 설정에서 로그인해 주세요."
         for start in range(0, len(text), 3):

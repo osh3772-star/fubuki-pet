@@ -100,19 +100,35 @@ class UIDebugRegressions(unittest.TestCase):
             self.app.processEvents();time.sleep(.005)
         self.assertIsNone(self.w.worker)
 
-    def test_effort_choices_match_all_local_providers(self):
-        allowed={'gemini':{None,'low','high'},'antigravity_gemini':{None,'low','medium','high','xhigh','max'},'claude':{None,'low','medium','high','xhigh','max'}}
-        for provider,expected in allowed.items():
-            self.w.select_provider(provider)
-            actual={self.w.reasoning_effort.itemData(i) for i in range(self.w.reasoning_effort.count()) if self.w.reasoning_effort.model().item(i).isEnabled()}
-            self.assertEqual(actual,expected)
-        self.w.select_provider('chatgpt')
-        self.assertTrue(all(self.w.reasoning_effort.model().item(i).isEnabled() for i in range(self.w.reasoning_effort.count())))
+    def test_unknown_effort_support_is_default_only_for_every_provider(self):
+        for provider in ('gemini', 'antigravity_gemini', 'claude', 'chatgpt'):
+            with self.subTest(provider=provider):
+                self.w.select_provider(provider)
+                self.assertEqual(self.w.reasoning_effort.count(), 1)
+                self.assertIsNone(self.w.reasoning_effort.currentData())
+                self.assertFalse(self.w.reasoning_effort.isEnabled())
+                if provider != 'chatgpt':
+                    self.assertIn('CLI 기본값', self.w.reasoning_note.text())
+                    self.assertNotIn('reasoning 생략', self.w.reasoning_note.text())
 
-    def test_switching_resets_incompatible_selected_effort(self):
-        self.w.reasoning_effort.setCurrentIndex(self.w.reasoning_effort.findData('medium'))
-        self.w.select_provider('gemini')
-        self.assertIsNone(self.w.reasoning_effort.currentData())
+    def test_provider_change_refreshes_capabilities_even_for_the_same_model_slug(self):
+        allowed = {'claude': ('medium', 'high'), 'gemini': ('low', 'high'),
+                   'antigravity_gemini': None, 'chatgpt': None}
+        for provider, supported in allowed.items():
+            hook = patch.object(self.w.providers[provider], 'supported_reasoning_efforts',
+                                return_value=supported, create=True)
+            hook.start()
+            self.addCleanup(hook.stop)
+            self.w._provider_models[provider] = [{'slug': 'shared', 'display_name': 'Shared test model'}]
+        for provider, supported in allowed.items():
+            with self.subTest(provider=provider):
+                self.w.select_provider(provider)
+                choices = [self.w.reasoning_effort.itemData(i)
+                           for i in range(self.w.reasoning_effort.count())]
+                self.assertEqual(choices, [None] + list(supported or ()))
+                self.assertIsNone(self.w.reasoning_effort.currentData())
+                if supported:
+                    self.w.reasoning_effort.setCurrentIndex(1)
 
     def test_antigravity_refresh_fetches_new_catalog(self):
         client=AntigravityGeminiClient(self.tmp.name);client._connected=True
@@ -123,6 +139,46 @@ class UIDebugRegressions(unittest.TestCase):
         with patch.object(client,'_fetch_gemini_models',return_value=[{'slug':'gemini-new','display_name':'New'}]) as fetch:
             self.w.refresh_models();self.wait();fetch.assert_called_once()
         self.assertEqual(self.w.models.currentData(),'gemini-new')
+
+    def test_claude_connect_does_not_probe_capabilities_twice(self):
+        from windows_pet.claude_cli_client import ClaudeCLIClient
+        client = ClaudeCLIClient(self.tmp.name)
+        self.w.providers['claude'] = client
+        self.w.select_provider('claude')
+        self.w.mock = False
+        with patch.object(client, '_auth_status') as auth, \
+                patch.object(client, '_probe_model_efforts', return_value={'sonnet': ('low', 'high')}) as probe:
+            self.w.connect_account()
+            self.wait()
+            auth.assert_called_once()
+            probe.assert_called_once()
+        self.w.models.setCurrentIndex(self.w.models.findData('sonnet'))
+        self.assertEqual([self.w.reasoning_effort.itemData(i)
+                          for i in range(self.w.reasoning_effort.count())], [None, 'low', 'high'])
+
+    def test_claude_refresh_reloads_capabilities_and_resets_stale_choice(self):
+        from windows_pet.claude_cli_client import ClaudeCLIClient
+        client = ClaudeCLIClient(self.tmp.name)
+        client._connected = True
+        client._model_efforts = {'sonnet': ('high',)}
+        self.w.providers['claude'] = client
+        self.w.select_provider('claude')
+        self.wait()
+        self.w.models.setCurrentIndex(self.w.models.findData('sonnet'))
+        self.w.reasoning_effort.setCurrentIndex(self.w.reasoning_effort.findData('high'))
+        self.assertEqual(self.w.reasoning_effort.currentData(), 'high')
+        self.w.mock = False
+        with patch.object(client, '_auth_status') as auth, \
+                patch.object(client, '_probe_model_efforts', return_value={'sonnet': ('low',)}) as probe:
+            self.w.refresh_models()
+            self.wait()
+            auth.assert_called_once()
+            probe.assert_called_once()
+        self.assertEqual(self.w.models.currentData(), 'sonnet')
+        self.assertIsNone(self.w.reasoning_effort.currentData())
+        self.assertEqual([self.w.reasoning_effort.itemData(i)
+                          for i in range(self.w.reasoning_effort.count())], [None, 'low'])
+        self.assertNotIn('reasoning 생략', self.w.reasoning_note.text())
 
     def test_tray_includes_claude_and_chat_uses_transient_event(self):
         source=(Path(__file__).parents[1]/'windows_pet/app.py').read_text()

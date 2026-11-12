@@ -10,7 +10,7 @@ from unittest.mock import patch
 from PySide6.QtWidgets import QApplication
 from windows_pet.chatgpt_client import (
     ChatGPTClient, MockChatGPTClient, ChatGPTError, DIRECT, REASONING_EFFORTS,
-    REASONING_REJECTED,
+    REASONING_REJECTED, REASONING_UNAVAILABLE, get_supported_reasoning_efforts,
 )
 from windows_pet.chat_window import ChatWindow
 from test_chatgpt_client import Response
@@ -47,17 +47,60 @@ class ReasoningPayloadTests(unittest.TestCase):
         self.assertTrue(payload['stream'])
         self.assertNotIn('tools', payload)
 
-    def test_each_documented_value_is_passed_exactly(self):
-        for effort in REASONING_EFFORTS:
+    def allow(self, *efforts):
+        # Explicit test adapter, not unverified fields in the model catalog.
+        hook = patch.object(self.client, 'supported_reasoning_efforts',
+                            side_effect=lambda model: efforts if model == 'account-model' else None)
+        hook.start()
+        self.addCleanup(hook.stop)
+
+    def test_unknown_support_rejects_every_manual_value_before_auth_or_network(self):
+        self.assertIsNone(self.client.supported_reasoning_efforts('account-model'))
+        with patch.object(self.client, '_access') as access:
+            for effort in REASONING_EFFORTS:
+                with self.subTest(effort=effort), self.assertRaisesRegex(ChatGPTError, REASONING_UNAVAILABLE):
+                    self.send(reasoning_effort=effort)
+            access.assert_not_called()
+        self.http.assert_not_called()
+
+    def test_only_explicit_per_model_capabilities_allow_override(self):
+        self.allow('high', 'xhigh')
+        for effort in ('high', 'xhigh'):
             with self.subTest(effort=effort):
                 self.assertEqual(self.send(reasoning_effort=effort), 'offline response')
                 payload = self.http.call_args.kwargs['json']
                 self.assertEqual(payload['reasoning'], {'effort': effort})
                 self.assertEqual(payload['model'], 'account-model')
+        self.http.reset_mock()
+        with patch.object(self.client, '_access') as access:
+            with self.assertRaises(ChatGPTError):
+                self.send(reasoning_effort='low')
+            with self.assertRaises(ChatGPTError):
+                self.client.stream_reply([], 'different-model', lambda _: None, reasoning_effort='high')
+            access.assert_not_called()
+        self.http.assert_not_called()
 
-    def test_none_string_is_an_explicit_setting(self):
+    def test_verified_none_string_is_explicit_and_never_equals_default(self):
+        self.allow('none')
         self.send(reasoning_effort='none')
         self.assertEqual(self.http.call_args.kwargs['json']['reasoning'], {'effort': 'none'})
+        self.send()
+        self.assertNotIn('reasoning', self.http.call_args.kwargs['json'])
+
+    def test_unknown_or_invalid_capability_hook_fails_closed(self):
+        for value in (None, 'high', {'reasoning_effort': ['high']}, ['high', 'ultra'], [True], [1], [{}]):
+            with self.subTest(value=value), patch.object(self.client, 'supported_reasoning_efforts', return_value=value):
+                self.assertIsNone(get_supported_reasoning_efforts(self.client, 'account-model'))
+                with self.assertRaises(ChatGPTError):
+                    self.send(reasoning_effort='high')
+        with patch.object(self.client, 'supported_reasoning_efforts', side_effect=RuntimeError('unavailable')):
+            self.assertIsNone(get_supported_reasoning_efforts(self.client, 'account-model'))
+        self.http.assert_not_called()
+
+    def test_missing_hook_or_no_model_is_unknown(self):
+        self.assertIsNone(get_supported_reasoning_efforts(object(), 'account-model'))
+        self.allow('high')
+        self.assertIsNone(get_supported_reasoning_efforts(self.client, None))
 
     def test_invalid_effort_rejected_before_auth_or_network(self):
         with patch.object(self.client, '_access') as access:
@@ -68,6 +111,7 @@ class ReasoningPayloadTests(unittest.TestCase):
             self.http.assert_not_called()
 
     def test_http_unsupported_setting_is_sanitized_and_never_retried(self):
+        self.allow('high', 'max')
         response = Response({'error': {'param': 'reasoning.effort',
                                       'message': 'Unsupported fake-private-server-text'}})
         response.status_code = 400
@@ -79,6 +123,7 @@ class ReasoningPayloadTests(unittest.TestCase):
         self.assertEqual(self.http.call_count, 1)
 
     def test_generic_rejection_does_not_claim_a_specific_parameter_cause(self):
+        self.allow('high', 'max')
         response = Response({'error': {'param': 'input', 'message': 'private details'}})
         response.status_code = 422
         self.http.return_value = response
@@ -89,6 +134,7 @@ class ReasoningPayloadTests(unittest.TestCase):
         self.assertEqual(self.http.call_count, 1)
 
     def test_malformed_error_body_keeps_safe_recovery(self):
+        self.allow('high', 'max')
         response = Response()
         response.status_code = 400
         self.http.return_value = response
@@ -99,6 +145,7 @@ class ReasoningPayloadTests(unittest.TestCase):
         self.assertNotIn('private', str(caught.exception))
 
     def test_401_and_429_keep_auth_and_usage_errors(self):
+        self.allow('high', 'max')
         for status, expected in ((401, '로그인'), (429, '사용량 한도')):
             with self.subTest(status=status):
                 response = Response({'error': {'param': 'reasoning.effort'}})
@@ -109,6 +156,7 @@ class ReasoningPayloadTests(unittest.TestCase):
                 self.assertIn(expected, str(caught.exception))
 
     def test_stream_parameter_errors_are_sanitized(self):
+        self.allow('high', 'max')
         for event in (
             {'type': 'error', 'param': 'reasoning.effort', 'message': 'private'},
             {'type': 'response.failed', 'response': {'error': {
@@ -123,16 +171,25 @@ class ReasoningPayloadTests(unittest.TestCase):
 
     def test_catalog_does_not_fabricate_effort_support(self):
         self.http.return_value = Response({'models': [
-            {'slug': 'future-model', 'display_name': 'Future', 'visibility': 'list'}]})
+            {'slug': 'future-model', 'display_name': 'Future', 'visibility': 'list',
+             'reasoning_efforts': ['low', 'high'], 'supported_reasoning_efforts': ['none']}]})
         self.assertEqual(self.client.list_models(), [{'slug': 'future-model', 'display_name': 'Future'}])
+        self.assertIsNone(get_supported_reasoning_efforts(self.client, 'future-model'))
 
-    def test_mock_accepts_effort_without_real_inference(self):
+    def test_model_names_do_not_imply_capabilities(self):
+        for model in ('gpt-5.2-pro', 'gpt-6-astra', 'gpt-6.1-sol', 'future-model'):
+            with self.subTest(model=model):
+                self.assertIsNone(get_supported_reasoning_efforts(self.client, model))
+        self.http.assert_not_called()
+
+    def test_mock_uses_default_without_real_inference_and_rejects_manual_effort(self):
         client = MockChatGPTClient()
         client.sign_in()
         with patch('windows_pet.chatgpt_client.requests.Session.request', side_effect=AssertionError('network')):
             with patch('windows_pet.chatgpt_client.time.sleep'):
-                self.assertIn('오프라인 데모', client.stream_reply([], 'offline-demo', lambda x: None,
-                                                               reasoning_effort='xhigh'))
+                self.assertIn('오프라인 데모', client.stream_reply([], 'offline-demo', lambda x: None))
+                with self.assertRaises(ChatGPTError):
+                    client.stream_reply([], 'offline-demo', lambda x: None, reasoning_effort='xhigh')
 
 
 class RecordingClient(FakeClient):
@@ -140,6 +197,10 @@ class RecordingClient(FakeClient):
         super().__init__()
         self.efforts = []
         self.fail_next = False
+        self.capabilities = {}
+
+    def supported_reasoning_efforts(self, model):
+        return self.capabilities.get(model)
 
     def stream_reply(self, messages, model, on_delta, cancel, *, reasoning_effort=None):
         self.efforts.append(reasoning_effort)
@@ -179,37 +240,48 @@ class ReasoningUITests(unittest.TestCase):
     def select(self, value):
         self.window.reasoning_effort.setCurrentIndex(self.window.reasoning_effort.findData(value))
 
-    def test_starts_at_server_default_and_disabled_until_connected(self):
+    def allow(self, *efforts, model='mock'):
+        self.client.capabilities[model] = efforts
+        self.window.refresh_controls()
+
+    def choices(self):
+        return [self.window.reasoning_effort.itemData(i)
+                for i in range(self.window.reasoning_effort.count())]
+
+    def test_unknown_capabilities_offer_only_default_even_when_connected(self):
         self.assertIsNone(self.window.reasoning_effort.currentData())
         self.assertFalse(self.window.reasoning_effort.isEnabled())
-        self.assertEqual(self.window.reasoning_effort.count(), len(REASONING_EFFORTS) + 1)
-        self.assertIn('모델마다 지원 단계가 다릅니다', self.window.reasoning_note.text())
+        self.assertEqual(self.choices(), [None])
+        self.assertIn('서버 기본값만 사용', self.window.reasoning_note.text())
+        self.assertIn("'none'(추론 없음)이 아닙니다", self.window.reasoning_note.text())
+        self.assertIn('reasoning 생략', self.window.reasoning_note.text())
         self.connect()
-        self.assertTrue(self.window.reasoning_effort.isEnabled())
+        self.assertFalse(self.window.reasoning_effort.isEnabled())
+        self.assertEqual(self.choices(), [None])
+        self.assertTrue(self.window.send_button.isEnabled())
 
-    def test_restored_login_loads_catalog_and_enables_reasoning_without_signin(self):
+    def test_restored_login_loads_default_only_catalog_without_signin(self):
         self.client.connected = True
-        # Simulate the persisted session present when the window is created.
         with patch.object(self.client, 'sign_in', side_effect=AssertionError('unexpected login')):
             with patch.object(self.client, 'list_models', wraps=self.client.list_models) as catalog:
                 self.app.processEvents()
                 self.wait()
                 self.assertEqual(self.window.models.currentData(), 'mock')
-                self.assertTrue(self.window.reasoning_effort.isEnabled())
-                self.select('high')
+                self.assertFalse(self.window.reasoning_effort.isEnabled())
+                self.assertEqual(self.choices(), [None])
                 self.window._load_connected_models()
                 self.assertEqual(catalog.call_count, 1)
-                self.assertEqual(self.window.reasoning_effort.currentData(), 'high')
         self.assertEqual(self.client.calls, 0)
 
     def test_switch_to_restored_provider_loads_missing_catalog(self):
-        self.app.processEvents()  # Finish the initial disconnected startup.
+        self.app.processEvents()
         self.window.select_provider('gemini')
         self.client.connected = True
         self.window.select_provider('chatgpt')
         self.wait()
         self.assertEqual(self.window.models.currentData(), 'mock')
-        self.assertTrue(self.window.reasoning_effort.isEnabled())
+        self.assertFalse(self.window.reasoning_effort.isEnabled())
+        self.assertEqual(self.choices(), [None])
         self.assertEqual(self.client.calls, 0)
 
     def test_catalog_failure_is_not_retried_automatically(self):
@@ -223,6 +295,7 @@ class ReasoningUITests(unittest.TestCase):
             self.assertIn('catalog unavailable', self.window.status.text())
 
     def test_selected_value_used_busy_controls_locked_and_repeat_send_ignored(self):
+        self.allow('xhigh')
         self.connect()
         self.select('xhigh')
         self.client.slow = True
@@ -244,13 +317,79 @@ class ReasoningUITests(unittest.TestCase):
         self.assertEqual(self.client.efforts, [None])
 
     def test_model_change_resets_to_server_default(self):
+        self.allow('high')
         self.connect()
         self.select('high')
         self.window.models.addItem('Other model', 'other')
         self.window.models.setCurrentIndex(1)
         self.assertIsNone(self.window.reasoning_effort.currentData())
 
+    def test_model_change_rebuilds_choices_and_never_reuses_another_models_effort(self):
+        self.allow('high', 'xhigh')
+        self.allow('high', 'low', model='other')
+        self.connect()
+        self.select('high')
+        self.window.models.addItem('Other', 'other')
+        self.window.models.addItem('Unknown', 'unknown')
+        self.window.models.setCurrentIndex(1)
+        self.assertEqual(self.choices(), [None, 'low', 'high'])
+        self.assertIsNone(self.window.reasoning_effort.currentData())
+        self.select('low')
+        self.window.models.setCurrentIndex(2)
+        self.assertEqual(self.choices(), [None])
+        self.assertIsNone(self.window.reasoning_effort.currentData())
+        self.assertFalse(self.window.reasoning_effort.isEnabled())
+        self.window.models.setCurrentIndex(0)
+        self.assertEqual(self.choices(), [None, 'high', 'xhigh'])
+        self.assertIsNone(self.window.reasoning_effort.currentData())
+
+    def test_same_model_refresh_drops_no_longer_supported_selection(self):
+        self.allow('high', 'xhigh')
+        self.connect()
+        self.select('xhigh')
+        self.client.capabilities['mock'] = ('high',)
+        self.window.refresh_models()
+        self.wait()
+        self.assertEqual(self.choices(), [None, 'high'])
+        self.assertIsNone(self.window.reasoning_effort.currentData())
+        self.select('high')
+        self.client.capabilities.clear()
+        self.window.refresh_models()
+        self.wait()
+        self.assertEqual(self.choices(), [None])
+        self.assertIsNone(self.window.reasoning_effort.currentData())
+
+    def test_manually_injected_unsupported_selection_is_blocked_before_send(self):
+        self.connect()
+        for value in ('none', 'low', 'high', 'ultra'):
+            with self.subTest(value=value):
+                self.window.reasoning_effort.addItem('Injected', value)
+                self.select(value)
+                self.window.input.setPlainText('보존할 문장')
+                self.window.send()
+                self.assertIsNone(self.window.worker)
+                self.assertEqual(self.client.calls, 0)
+                self.assertEqual(self.client.efforts, [])
+                self.assertEqual(self.window.input.toPlainText(), '보존할 문장')
+                self.assertEqual(self.window.history, [])
+                self.assertEqual(self.choices(), [None])
+                self.assertIn('추론 강도', self.window.status.text())
+
+    def test_capability_change_before_send_preserves_draft_and_resets_selection(self):
+        self.allow('high')
+        self.connect()
+        self.select('high')
+        self.client.capabilities.clear()
+        self.window.input.setPlainText('보존할 문장')
+        self.window.send()
+        self.assertEqual(self.client.calls, 0)
+        self.assertIsNone(self.window.worker)
+        self.assertEqual(self.window.input.toPlainText(), '보존할 문장')
+        self.assertEqual(self.choices(), [None])
+        self.assertEqual(self.window.status.text(), REASONING_UNAVAILABLE)
+
     def test_refresh_of_same_model_preserves_effort(self):
+        self.allow('high')
         self.connect()
         self.select('high')
         self.window.refresh_models()
@@ -258,6 +397,7 @@ class ReasoningUITests(unittest.TestCase):
         self.assertEqual(self.window.reasoning_effort.currentData(), 'high')
 
     def test_failed_setting_preserves_draft_no_retry_then_explicit_default_retry(self):
+        self.allow('max')
         self.connect()
         self.select('max')
         self.client.fail_next = True
@@ -276,6 +416,7 @@ class ReasoningUITests(unittest.TestCase):
         self.assertEqual(len(self.window.history), 2)
 
     def test_logout_clears_selection_and_disables_effort(self):
+        self.allow('high')
         self.connect()
         self.select('high')
         self.window.logout()
@@ -284,6 +425,7 @@ class ReasoningUITests(unittest.TestCase):
         self.assertFalse(self.window.reasoning_effort.isEnabled())
 
     def test_close_and_cancel_restores_draft_without_committing(self):
+        self.allow('high')
         self.connect()
         self.select('high')
         self.client.slow = True
@@ -298,3 +440,4 @@ class ReasoningUITests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

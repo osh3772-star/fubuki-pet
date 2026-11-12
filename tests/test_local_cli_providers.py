@@ -21,7 +21,7 @@ from windows_pet.chatgpt_client import (
     Cancelled,
     DEFAULT_MAX_REPLY_CHARS,
     PERSONA,
-    REASONING_REJECTED,
+    REASONING_UNAVAILABLE,
 )
 from windows_pet.local_cli_clients import (
     AntigravityGeminiClient,
@@ -123,7 +123,7 @@ class LocalCLIClientTests(unittest.TestCase):
                 for key in STRIPPED_API_KEY_VARS:
                     self.assertNotIn(key, passed_env)
 
-    def test_antigravity_stream_reply_and_effort_forwarding(self):
+    def test_antigravity_stream_reply_uses_model_and_omits_unverified_effort(self):
         client = AntigravityGeminiClient(self.temp.name)
         client._connected = True
         events = [
@@ -160,15 +160,13 @@ class LocalCLIClientTests(unittest.TestCase):
                     [{"role": "user", "content": "인사해줘"}],
                     "gemini-4-argon-high",
                     deltas.append,
-                    reasoning_effort="high",
                 )
                 self.assertEqual(reply, "안녕! 안티그래비티 후부키야.")
                 self.assertEqual(deltas, ["안녕! ", "안티그래비티 후부키야."])
                 cmd = popen_mock.call_args.args[0]
                 self.assertIn("--model", cmd)
                 self.assertIn("gemini-4-argon-high", cmd)
-                self.assertIn("--effort", cmd)
-                self.assertIn("high", cmd)
+                self.assertNotIn("--effort", cmd)
                 self.assertIn("--sandbox", cmd)
 
     def test_antigravity_rejects_claude_model_and_unsupported_effort(self):
@@ -183,7 +181,7 @@ class LocalCLIClientTests(unittest.TestCase):
                 lambda d: None,
                 reasoning_effort="minimal",
             )
-        self.assertEqual(str(caught.exception), REASONING_REJECTED)
+        self.assertEqual(str(caught.exception), REASONING_UNAVAILABLE)
 
     def test_gemini_cli_stream_reply_and_safety(self):
         client = GeminiCLIClient(self.temp.name)
@@ -206,7 +204,10 @@ class LocalCLIClientTests(unittest.TestCase):
                 json.dumps({"type": "result", "status": "success"}),
             ]
             deltas = []
-            with patch("windows_pet.local_cli_clients.subprocess.Popen", return_value=FakePopen(events)) as popen_mock:
+            # This fixture explicitly verifies a config capability. Production
+            # stays default-only until installed resolution can be verified.
+            with patch.object(client, 'supported_reasoning_efforts', return_value=('low', 'high')), \
+                    patch("windows_pet.local_cli_clients.subprocess.Popen", return_value=FakePopen(events)) as popen_mock:
                 reply = client.stream_reply(
                     [{"role": "user", "content": "안녕"}],
                     "gemini-3.1-pro-preview",
@@ -223,9 +224,12 @@ class LocalCLIClientTests(unittest.TestCase):
                 settings_file = client.workspace_dir / ".gemini" / "settings.json"
                 self.assertTrue(settings_file.is_file())
                 cfg = json.loads(settings_file.read_text(encoding="utf-8"))
+                overrides = cfg["modelConfigs"]["customOverrides"]
+                self.assertEqual(len(overrides), 1)
+                self.assertEqual(overrides[0]["match"], {"model": "gemini-3.1-pro-preview"})
                 self.assertEqual(
-                    cfg["modelConfigs"]["customAliases"]["chat-base-3"]["modelConfig"]["generateContentConfig"]["thinkingConfig"]["thinkingLevel"],
-                    "LOW",
+                    overrides[0]["modelConfig"]["generateContentConfig"]["thinkingConfig"],
+                    {"thinkingLevel": "LOW"},
                 )
             with self.assertRaises(ChatGPTError) as caught:
                 client.stream_reply(
@@ -234,7 +238,7 @@ class LocalCLIClientTests(unittest.TestCase):
                     lambda d: None,
                     reasoning_effort="xhigh",
                 )
-            self.assertEqual(str(caught.exception), REASONING_REJECTED)
+            self.assertEqual(str(caught.exception), REASONING_UNAVAILABLE)
 
 
 class MultiProviderUITests(unittest.TestCase):
@@ -319,6 +323,38 @@ class MultiProviderUITests(unittest.TestCase):
         self.assertIn("Claude", self.window.transcript.toPlainText())
         self.window.select_provider("chatgpt")
         self.assertEqual(self.window.current_provider, "chatgpt")
+
+    def test_gemini_names_do_not_imply_verified_installed_effort_support(self):
+        self.window.select_provider('gemini')
+        self.window.connect_account()
+        self.wait()
+        self.assertEqual(self.window.models.currentData(), 'auto')
+        self.assertIn('자동 모델', self.window.reasoning_note.text())
+        self.window.models.addItem('Unknown future Gemini', 'gemini-99-pro')
+        for model in ('auto', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-99-pro'):
+            with self.subTest(model=model):
+                self.window.models.setCurrentIndex(self.window.models.findData(model))
+                self.assertEqual(self.window.reasoning_effort.count(), 1)
+                self.assertIsNone(self.window.reasoning_effort.currentData())
+                self.assertFalse(self.window.reasoning_effort.isEnabled())
+
+    def test_manual_unverified_effort_is_rejected_for_every_provider(self):
+        for provider in ('chatgpt', 'gemini', 'antigravity_gemini', 'claude'):
+            with self.subTest(provider=provider):
+                self.window.select_provider(provider)
+                self.window.connect_account()
+                self.wait()
+                self.window.reasoning_effort.addItem('Injected none', 'none')
+                self.window.reasoning_effort.setCurrentIndex(self.window.reasoning_effort.findData('none'))
+                self.window.input.setPlainText('전송하지 않을 문장')
+                with patch.object(self.window.client, 'stream_reply') as stream:
+                    self.window.send()
+                    self.assertIsNone(self.window.worker)
+                    stream.assert_not_called()
+                self.assertEqual(self.window.input.toPlainText(), '전송하지 않을 문장')
+                self.assertEqual(self.window.history, [])
+                self.assertIsNone(self.window.reasoning_effort.currentData())
+                self.assertEqual(self.window.reasoning_effort.findData('none'), -1)
 
     def test_multilingual_persona_and_prompt_support_ko_ja_en(self):
         self.assertIn("한국어", PERSONA)

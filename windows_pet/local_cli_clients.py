@@ -13,6 +13,7 @@ import queue
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -21,10 +22,8 @@ from .chatgpt_client import (
     ChatGPTError,
     DEFAULT_MAX_REPLY_CHARS,
     PERSONA,
-    REASONING_EFFORTS,
-    REASONING_REJECTED,
     _check,
-    _validate_reasoning_effort,
+    validate_model_reasoning_effort,
     build_persona_instructions,
 )
 
@@ -48,8 +47,55 @@ GEMINI_CLI_MODELS = (
 )
 
 VALID_GEMINI_CLI_SLUGS = frozenset(slug for slug, _ in GEMINI_CLI_MODELS)
-GEMINI_CLI_EFFORTS = ("low", "high")
-ANTIGRAVITY_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# Exact documented model IDs, not provider-wide or future-prefix guesses.
+# https://ai.google.dev/gemini-api/docs/thinking
+# https://geminicli.com/docs/reference/configuration/
+_GEMINI_THINKING_LEVEL_MODELS = frozenset((
+    "gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-3.8-flash",
+    "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+))
+_GEMINI_THINKING_BUDGET_MODELS = frozenset(("gemini-2.5-pro",))
+
+
+def _gemini_reasoning_efforts(model):
+    if model in _GEMINI_THINKING_LEVEL_MODELS | _GEMINI_THINKING_BUDGET_MODELS:
+        return ("low", "high")
+    return None
+
+
+def _gemini_effort_config(model, effort):
+    if effort not in (_gemini_reasoning_efforts(model) or ()):
+        raise ValueError("Unsupported Gemini model/effort configuration")
+    if model in _GEMINI_THINKING_BUDGET_MODELS:
+        # Fubuki's low/high presets, not native named Gemini 2.5 effort tiers.
+        thinking = {"thinkingBudget": 1024 if effort == "low" else 24576}
+    else:
+        thinking = {"thinkingLevel": effort.upper()}
+    return {"customOverrides": [{
+        "match": {"model": model},
+        "modelConfig": {"generateContentConfig": {"thinkingConfig": thinking}},
+    }]}
+
+
+def _is_owned_gemini_effort_config(config):
+    """Recognize only exact payloads this app writes or historically wrote."""
+    for effort in ("low", "high"):
+        for model in _GEMINI_THINKING_LEVEL_MODELS | _GEMINI_THINKING_BUDGET_MODELS:
+            if config == _gemini_effort_config(model, effort):
+                return True
+        legacy = {"customAliases": {
+            "chat-base-3": {"extends": "chat-base", "modelConfig": {
+                "generateContentConfig": {"thinkingConfig": {"thinkingLevel": effort.upper()}}}},
+            "chat-base-2.5": {"extends": "chat-base", "modelConfig": {
+                "generateContentConfig": {"thinkingConfig": {
+                    "thinkingBudget": 1024 if effort == "low" else 24576}}}},
+        }}
+        if config == legacy:
+            return True
+    return False
+
+
 ANTIGRAVITY_DEFAULT_GEMINI_MODELS = (
     ("gemini-4-argon-high", "Gemini 4 Argon (High)"),
     ("gemini-4-argon-medium", "Gemini 4 Argon (Medium)"),
@@ -334,7 +380,6 @@ class GeminiCLIClient:
         self._connected = False
         self._label = ""
         self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
-        self._last_effort_setting = "__unset__"
 
     def session_info(self):
         with self._lock:
@@ -429,46 +474,53 @@ class GeminiCLIClient:
                 raise ChatGPTError("먼저 로컬 Gemini CLI에 연결하세요.")
         return [{"slug": slug, "display_name": name} for slug, name in GEMINI_CLI_MODELS]
 
-    def _configure_workspace_effort(self, reasoning_effort: str | None) -> None:
-        if getattr(self, "_last_effort_setting", "__unset__") == reasoning_effort:
-            return
-        self._last_effort_setting = reasoning_effort
+    def supported_reasoning_efforts(self, model):
+        # Model docs establish valid knobs, but project settings can lose to
+        # system settings and installed CLI overrides. Until resolved config
+        # is verified, do not advertise a setting that may be silently ignored.
+        return None
+
+    def _configure_workspace_effort(self, model, reasoning_effort: str | None) -> None:
         settings_dir = self.workspace_dir / ".gemini"
         settings_file = settings_dir / "settings.json"
-        if reasoning_effort is None:
-            settings_file.unlink(missing_ok=True)
-            return
-        level = reasoning_effort.upper()
-        budget = 1024 if reasoning_effort == "low" else 24576
-        payload = {
-            "modelConfigs": {
-                "customAliases": {
-                    "chat-base-3": {
-                        "extends": "chat-base",
-                        "modelConfig": {
-                            "generateContentConfig": {
-                                "thinkingConfig": {"thinkingLevel": level}
-                            }
-                        },
-                    },
-                    "chat-base-2.5": {
-                        "extends": "chat-base",
-                        "modelConfig": {
-                            "generateContentConfig": {
-                                "thinkingConfig": {"thinkingBudget": budget}
-                            }
-                        },
-                    },
-                }
-            }
-        }
-        settings_dir.mkdir(parents=True, exist_ok=True)
-        settings_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            if settings_file.exists():
+                payload = json.loads(settings_file.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError()
+            else:
+                payload = {}
+            existing = payload.get("modelConfigs")
+            owned = _is_owned_gemini_effort_config(existing)
+            if reasoning_effort is None:
+                # Default means native CLI configuration. Remove only a known
+                # app-generated override, never the user's other settings.
+                if not owned:
+                    return
+                payload.pop("modelConfigs")
+            else:
+                if existing not in (None, {}) and not owned:
+                    raise ChatGPTError("기존 Gemini 모델 설정과 충돌해 추론 강도를 적용하지 않았습니다. "
+                                       "'CLI 기본값'을 선택하세요. 요청은 전송하지 않았습니다.")
+                payload["modelConfigs"] = _gemini_effort_config(model, reasoning_effort)
+            settings_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=settings_dir,
+                                                 prefix=".settings-", suffix=".tmp", delete=False) as handle:
+                    temp_path = Path(handle.name)
+                    json.dump(payload, handle, indent=2)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp_path, settings_file)
+            finally:
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            raise ChatGPTError("Gemini 작업공간 설정을 확인하거나 저장하지 못했습니다. "
+                               "요청은 전송하지 않았습니다.") from None
 
     def stream_reply(self, messages, model, on_delta, cancel_event=None, *, reasoning_effort=None):
-        _validate_reasoning_effort(reasoning_effort)
-        if reasoning_effort is not None and reasoning_effort not in GEMINI_CLI_EFFORTS:
-            raise ChatGPTError(REASONING_REJECTED)
         _check(cancel_event)
         with self._lock:
             if not self._connected:
@@ -476,7 +528,8 @@ class GeminiCLIClient:
         selected_model = model or "auto"
         if not _is_gemini_model_slug(selected_model) or selected_model not in VALID_GEMINI_CLI_SLUGS:
             raise ChatGPTError("지원하지 않는 Gemini 모델입니다.")
-        self._configure_workspace_effort(reasoning_effort)
+        validate_model_reasoning_effort(self, selected_model, reasoning_effort)
+        self._configure_workspace_effort(selected_model, reasoning_effort)
         limit = getattr(self, "max_reply_chars", DEFAULT_MAX_REPLY_CHARS)
         prompt = _validate_and_format_messages(messages, max_reply_chars=limit)
         base_cmd = _find_gemini_cli_command()
@@ -584,7 +637,6 @@ class AntigravityGeminiClient:
         self._connected = False
         self._label = ""
         self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
-        self._last_effort_setting = "__unset__"
         self._cached_models: list[dict[str, str]] = []
 
     def session_info(self):
@@ -679,10 +731,14 @@ class AntigravityGeminiClient:
             self._label = f"로컬 Antigravity (Gemini {len(models)}개 모델)"
         return models
 
+    def supported_reasoning_efforts(self, model):
+        # `agy models` provides names, not --effort capabilities. A suffix such
+        # as "high" is part of the selected model ID, not evidence for other
+        # tiers. Do not probe /effort without a verified version and schema.
+        return None
+
     def stream_reply(self, messages, model, on_delta, cancel_event=None, *, reasoning_effort=None):
-        _validate_reasoning_effort(reasoning_effort)
-        if reasoning_effort is not None and reasoning_effort not in ANTIGRAVITY_EFFORTS:
-            raise ChatGPTError(REASONING_REJECTED)
+        validate_model_reasoning_effort(self, model, reasoning_effort)
         _check(cancel_event)
         with self._lock:
             if not self._connected:
@@ -836,14 +892,12 @@ class MockLocalCLIClient:
             {"slug": "gemini-3.1-pro-preview", "display_name": "Gemini 3.1 Pro Preview [오프라인 데모]"},
         ]
 
+    def supported_reasoning_efforts(self, model):
+        # Demo controls mirror production, not hypothetical provider support.
+        return None
+
     def stream_reply(self, messages, model, on_delta, cancel_event=None, *, reasoning_effort=None):
-        _validate_reasoning_effort(reasoning_effort)
-        if self.provider == "gemini" and reasoning_effort is not None and reasoning_effort not in GEMINI_CLI_EFFORTS:
-            raise ChatGPTError(REASONING_REJECTED)
-        if self.provider == "antigravity_gemini" and reasoning_effort is not None and reasoning_effort not in ANTIGRAVITY_EFFORTS:
-            raise ChatGPTError(REASONING_REJECTED)
-        if self.provider == "claude" and reasoning_effort is not None and reasoning_effort not in ("low", "medium", "high", "xhigh", "max"):
-            raise ChatGPTError(REASONING_REJECTED)
+        validate_model_reasoning_effort(self, model, reasoning_effort)
         self.list_models(cancel_event)
         tag = "Claude Code" if self.provider == "claude" else "Antigravity Gemini" if self.provider == "antigravity_gemini" else "Gemini CLI"
         text = f"[오프라인 데모 · {tag}] 안녕하세요! 후부키 {tag} 연결 화면이 정상 작동하고 있어요."

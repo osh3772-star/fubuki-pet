@@ -19,6 +19,9 @@ class ClaudeClientTests(unittest.TestCase):
         self.finder = patch('windows_pet.claude_cli_client._find_claude_command', return_value=['claude'])
         self.finder.start()
         self.addCleanup(self.finder.stop)
+        self.probe = patch.object(self.client, '_probe_model_efforts', return_value={})
+        self.probe.start()
+        self.addCleanup(self.probe.stop)
 
     def auth(self, method='claude.ai', logged=True):
         return subprocess.CompletedProcess([], 0, json.dumps({'loggedIn': logged, 'authMethod': method}), '')
@@ -40,6 +43,64 @@ class ClaudeClientTests(unittest.TestCase):
         with patch.dict(os.environ, values):
             env = _claude_env()
         for key in values: self.assertNotIn(key, env)
+
+    def test_alias_capabilities_are_unknown_without_exact_model_resolution(self):
+        for model in ('auto', 'sonnet', 'opus', 'haiku', 'unknown'):
+            with self.subTest(model=model):
+                self.assertIsNone(self.client.supported_reasoning_efforts(model))
+
+    def test_every_unverified_explicit_effort_rejected_before_auth(self):
+        self.client._connected = True
+        with patch('windows_pet.claude_cli_client.subprocess.run') as run, \
+                patch('windows_pet.claude_cli_client.subprocess.Popen') as popen:
+            for model in ('auto', 'sonnet', 'opus', 'haiku'):
+                for effort in ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'):
+                    with self.subTest(model=model, effort=effort):
+                        with self.assertRaisesRegex(ChatGPTError, '지원이 확인되지 않은'):
+                            self.client.stream_reply([], model, lambda _: None,
+                                                     reasoning_effort=effort)
+            run.assert_not_called()
+            popen.assert_not_called()
+
+    def test_explicit_effort_env_override_removed_only_from_child(self):
+        with patch.dict(os.environ, {'CLAUDE_CODE_EFFORT_LEVEL': 'max'}):
+            self.assertEqual(_claude_env()['CLAUDE_CODE_EFFORT_LEVEL'], 'max')
+            self.assertNotIn('CLAUDE_CODE_EFFORT_LEVEL', _claude_env(reasoning_effort='low'))
+            self.assertEqual(os.environ['CLAUDE_CODE_EFFORT_LEVEL'], 'max')
+
+    def test_verified_effort_forwarded_without_inherited_override(self):
+        # A verified capability fixture tests forwarding without pretending
+        # the production alias-only catalog resolves exact model versions.
+        self.client._connected = True
+        proc = MagicMock()
+        proc.communicate.return_value = (json.dumps({'type': 'result', 'subtype': 'success',
+                                                     'is_error': False, 'result': 'hi'}), '')
+        proc.returncode = 0
+        proc.poll.return_value = 0
+        with patch.dict(os.environ, {'CLAUDE_CODE_EFFORT_LEVEL': 'max'}), \
+                patch.object(self.client, 'supported_reasoning_efforts', return_value=('low',)), \
+                patch('windows_pet.claude_cli_client.subprocess.run', return_value=self.auth()), \
+                patch('windows_pet.claude_cli_client.subprocess.Popen', return_value=proc) as popen:
+            self.client.stream_reply([{'role': 'user', 'content': 'hi'}], 'sonnet',
+                                     lambda _: None, reasoning_effort='low')
+            self.assertEqual(os.environ['CLAUDE_CODE_EFFORT_LEVEL'], 'max')
+        cmd = popen.call_args.args[0]
+        self.assertEqual(cmd[cmd.index('--effort') + 1], 'low')
+        self.assertNotIn('CLAUDE_CODE_EFFORT_LEVEL', popen.call_args.kwargs['env'])
+
+    def test_default_effort_preserves_cli_environment_and_omits_flag(self):
+        self.client._connected = True
+        proc = MagicMock()
+        proc.communicate.return_value = (json.dumps({'type': 'result', 'subtype': 'success',
+                                                     'is_error': False, 'result': 'hi'}), '')
+        proc.returncode = 0
+        proc.poll.return_value = 0
+        with patch.dict(os.environ, {'CLAUDE_CODE_EFFORT_LEVEL': 'high'}), \
+                patch('windows_pet.claude_cli_client.subprocess.run', return_value=self.auth()), \
+                patch('windows_pet.claude_cli_client.subprocess.Popen', return_value=proc) as popen:
+            self.client.stream_reply([{'role': 'user', 'content': 'hi'}], 'auto', lambda _: None)
+        self.assertNotIn('--effort', popen.call_args.args[0])
+        self.assertEqual(popen.call_args.kwargs['env']['CLAUDE_CODE_EFFORT_LEVEL'], 'high')
 
     def test_safe_text_reply_and_nonstreaming_callback(self):
         self.client._connected = True
