@@ -34,6 +34,7 @@ DIRECT = "chatgpt.tokens.use.direct"
 DEFAULT_MAX_REPLY_CHARS = 80
 REPLY_CHAR_LIMIT_OPTIONS = (
     ("짧게 · 80자 이내 (말풍선 기본값)", 80),
+    ("아주 짧게 (30자)", 30),
     ("보통 · 150자 이내", 150),
     ("제한 없음 (길게 대답)", None),
 )
