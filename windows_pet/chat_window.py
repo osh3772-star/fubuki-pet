@@ -9,10 +9,12 @@ from .ui_controls import RoundedComboBox as QComboBox
 PROVIDER_CONNECT_LABELS = {
     'chatgpt': 'Continue with ChatGPT',
     'gemini': '로컬 Gemini CLI 연결',
+    'claude': '로컬 Claude Code 연결',
     'antigravity_gemini': '로컬 Antigravity 연결',
 }
 
 PROVIDER_NOTICES = {
+    'claude': '설치된 공식 Claude Code에 직접 로그인한 구독만 사용합니다. API 키·쿠키·토큰을 가져오지 않습니다.\n채팅은 구독 한도와 계정의 추가 사용 정책을 따릅니다. 추가 결제 설정을 확인하세요.\n모델 접근과 추론강도 지원은 구독·CLI 버전에 따라 다릅니다.',
     'chatgpt': (
         'ChatGPT 구독 연결만 사용합니다. API 키·자동 유료 전환은 없습니다.\n'
         '대화는 이 창의 메모리에만 보관되며 기존 ChatGPT 대화를 가져오지 않습니다.\n'
@@ -75,9 +77,11 @@ class ChatWindow(QWidget):
         super().__init__()
         from .chatgpt_client import ChatGPTClient, MockChatGPTClient, DEFAULT_MAX_REPLY_CHARS, REPLY_CHAR_LIMIT_OPTIONS
         from .local_cli_clients import PROVIDERS, GeminiCLIClient, AntigravityGeminiClient, MockLocalCLIClient
+        from .claude_cli_client import ClaudeCLIClient
         default_chatgpt = client or (MockChatGPTClient(data_dir) if mock else ChatGPTClient(data_dir))
         self.providers = {
             'chatgpt': default_chatgpt,
+            'claude': MockLocalCLIClient('claude', data_dir) if mock else ClaudeCLIClient(data_dir),
             'gemini': MockLocalCLIClient('gemini', data_dir) if mock else GeminiCLIClient(data_dir),
             'antigravity_gemini': MockLocalCLIClient('antigravity_gemini', data_dir) if mock else AntigravityGeminiClient(data_dir),
         }
@@ -93,7 +97,7 @@ class ChatWindow(QWidget):
         self._transcript_rev = 0
         self.mock = mock
         if not mock and client is None and providers is None:
-            for code in ('gemini', 'antigravity_gemini'):
+            for code in ('gemini', 'antigravity_gemini', 'claude'):
                 fast_fn = getattr(self.providers.get(code), 'try_fast_connect', None)
                 if callable(fast_fn) and fast_fn():
                     try:
@@ -101,7 +105,7 @@ class ChatWindow(QWidget):
                     except Exception:
                         pass
             if not self.providers['chatgpt'].session_info().get('connected'):
-                for fallback_code in ('gemini', 'antigravity_gemini'):
+                for fallback_code in ('gemini', 'antigravity_gemini', 'claude'):
                     if self.providers[fallback_code].session_info().get('connected'):
                         self.current_provider = fallback_code
                         self.client = self.providers[fallback_code]
@@ -244,7 +248,7 @@ class ChatWindow(QWidget):
                 self.provider_selector.setCurrentIndex(idx)
                 self.provider_selector.blockSignals(False)
             self.connect_button.setText(PROVIDER_CONNECT_LABELS.get(self.current_provider, '연결'))
-            self.cli_login_button.setVisible(self.current_provider in ('gemini', 'antigravity_gemini'))
+            self.cli_login_button.setVisible(self.current_provider in ('gemini', 'antigravity_gemini', 'claude'))
             self.notice.setText(PROVIDER_NOTICES.get(self.current_provider, PROVIDER_NOTICES['chatgpt']))
             self._restore_provider_models(self.current_provider)
             self._effort_model = self.models.currentData()
@@ -271,8 +275,10 @@ class ChatWindow(QWidget):
         self.current_provider = provider_code
         self.client = self.providers[provider_code]
         self.connect_button.setText(PROVIDER_CONNECT_LABELS.get(provider_code, '연결'))
-        self.cli_login_button.setVisible(provider_code in ('gemini', 'antigravity_gemini'))
+        self.cli_login_button.setVisible(provider_code in ('gemini', 'antigravity_gemini', 'claude'))
         self.notice.setText(PROVIDER_NOTICES.get(provider_code, PROVIDER_NOTICES['chatgpt']))
+        self.logout_button.setText('연결 해제' if provider_code == 'claude' else '로그아웃')
+        self._sync_effort_options()
         self._restore_provider_models(provider_code)
         self.reasoning_effort.setCurrentIndex(0)
         self._effort_model = self.models.currentData()
@@ -309,14 +315,29 @@ class ChatWindow(QWidget):
             except Exception as exc:
                 from .chatgpt_client import ChatGPTError
                 self.status.setText(str(exc) if isinstance(exc, ChatGPTError) else 'CLI 로그인 창을 열지 못했습니다.')
+    def _sync_effort_options(self):
+        from .local_cli_clients import GEMINI_CLI_EFFORTS, ANTIGRAVITY_EFFORTS
+        from .claude_cli_client import CLAUDE_EFFORTS
+        supported = {'gemini': GEMINI_CLI_EFFORTS,
+                     'antigravity_gemini': ANTIGRAVITY_EFFORTS,
+                     'claude': CLAUDE_EFFORTS}.get(self.current_provider)
+        for index in range(self.reasoning_effort.count()):
+            value = self.reasoning_effort.itemData(index)
+            enabled = supported is None or value is None or value in supported
+            self.reasoning_effort.model().item(index).setEnabled(enabled)
+        selected = self.reasoning_effort.currentData()
+        if supported is not None and selected is not None and selected not in supported:
+            self.reasoning_effort.setCurrentIndex(0)
+
     def refresh_controls(self):
+        self._sync_effort_options()
         info = self.client.session_info()
         busy = self.worker is not None
         connected = bool(info.get('connected') and info.get('sharing'))
         self.provider_selector.setEnabled(not busy)
         self.connect_button.setEnabled(not busy)
         self.cli_login_button.setEnabled(not busy)
-        self.cli_login_button.setVisible(self.current_provider in ('gemini', 'antigravity_gemini'))
+        self.cli_login_button.setVisible(self.current_provider in ('gemini', 'antigravity_gemini', 'claude'))
         self.refresh_button.setEnabled(connected and not busy)
         self.logout_button.setEnabled(bool(info.get('connected')) and not busy)
         self.models.setEnabled(not busy)
@@ -331,6 +352,8 @@ class ChatWindow(QWidget):
             if connected:
                 if self.mock:
                     self.status.setText('모의 테스트 · 네트워크 사용 없음')
+                elif self.current_provider == 'claude':
+                    self.status.setText('Claude (로컬 Claude Code) · 연결됨')
                 elif self.current_provider == 'gemini':
                     self.status.setText('Gemini (로컬 CLI) · ' + (info.get('email') or '연결됨'))
                 elif self.current_provider == 'antigravity_gemini':
@@ -338,7 +361,9 @@ class ChatWindow(QWidget):
                 else:
                     self.status.setText('ChatGPT 구독 · ' + (info.get('email') or '연결됨'))
             else:
-                if self.current_provider == 'gemini':
+                if self.current_provider == 'claude':
+                    self.status.setText('연결 안 됨 · Claude Code에서 직접 로그인 후 연결하세요.')
+                elif self.current_provider == 'gemini':
                     self.status.setText('연결 안 됨 · 로컬 Gemini CLI 연결 확인이 필요합니다.')
                 elif self.current_provider == 'antigravity_gemini':
                     self.status.setText('연결 안 됨 · 로컬 Antigravity 연결 확인이 필요합니다.')
@@ -357,7 +382,7 @@ class ChatWindow(QWidget):
         self.refresh_controls()
         signin_text = (
             '로컬 CLI 상태 확인 중…'
-            if self.current_provider in ('gemini', 'antigravity_gemini')
+            if self.current_provider in ('gemini', 'antigravity_gemini', 'claude')
             else '브라우저 로그인 대기 중…'
         )
         self.status.setText({'signin':signin_text, 'models':'사용 가능한 모델 확인 중…', 'chat':'フブキ가 생각 중…', 'logout':'연결 해제 중…'}[name])
@@ -377,7 +402,9 @@ class ChatWindow(QWidget):
                 if answer != QMessageBox.StandardButton.Yes: return
         self.start('signin', lambda cancel, delta:self.client.sign_in(cancel))
     def refresh_models(self):
-        self.start('models', lambda cancel, delta:self.client.list_models(cancel))
+        # User-visible refresh must ask the CLI, not replay startup cache.
+        options = {'force_refresh': True} if self.current_provider == 'antigravity_gemini' and not self.mock else {}
+        self.start('models', lambda cancel, delta:self.client.list_models(cancel, **options))
     def on_model_changed(self):
         model = self.models.currentData()
         self._provider_selected_model[self.current_provider] = model
@@ -484,3 +511,4 @@ class ChatWindow(QWidget):
             self.worker.cancel.set()
             return self.worker.wait(35000)
         return True
+

@@ -6,8 +6,10 @@ invoking the official local CLI executable.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
+import queue
 from pathlib import Path
 import shutil
 import subprocess
@@ -30,6 +32,7 @@ PROVIDERS = (
     ("chatgpt", "ChatGPT 구독 (OpenAI 공식 로그인)"),
     ("gemini", "Gemini (로컬 Gemini CLI)"),
     ("antigravity_gemini", "Antigravity Gemini (로컬 Antigravity)"),
+    ("claude", "Claude (로컬 Claude Code 구독)"),
 )
 
 GEMINI_CLI_MODELS = (
@@ -96,7 +99,9 @@ def _terminate_process(proc: subprocess.Popen) -> None:
                 timeout=5,
                 creationflags=_creation_flags(),
             )
-            return
+            if proc.poll() is not None:
+                proc.wait(timeout=2)
+                return
         except Exception:
             pass
     try:
@@ -105,8 +110,125 @@ def _terminate_process(proc: subprocess.Popen) -> None:
     except Exception:
         try:
             proc.kill()
+            proc.wait(timeout=2)
         except Exception:
             pass
+
+
+# Keep pipe I/O off the caller thread: a CLI may be silent, stop reading stdin,
+# or fill stderr before emitting its first JSON event.
+CLI_REPLY_TIMEOUT = 180.0
+_PIPE_POLL_INTERVAL = 0.05
+_MAX_EVENT_CHARS = 256 * 1024
+
+
+def _check_reply_deadline(cancel_event, deadline):
+    _check(cancel_event)
+    if time.monotonic() >= deadline:
+        raise ChatGPTError("응답 제한 시간을 넘겨 중단했습니다. 다시 시도하세요.")
+
+
+def _wait_for_cli(proc, cancel_event, deadline):
+    # Continue honoring Stop even after the final result or stdout EOF.
+    exit_deadline = min(deadline, time.monotonic() + 5)
+    while True:
+        _check_reply_deadline(cancel_event, deadline)
+        remaining = exit_deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("local CLI", 5)
+        try:
+            return proc.wait(timeout=min(_PIPE_POLL_INTERVAL, remaining))
+        except subprocess.TimeoutExpired:
+            pass
+
+
+@contextmanager
+def _cli_output(proc, prompt, cancel_event, deadline):
+    """Bounded JSON-line queue, discarded stderr, and interruptible input writes.
+
+    Each worker owns and closes its pipe. Never close a pipe from the caller
+    while another thread holds its I/O lock, which itself could block Stop.
+    """
+    lines = queue.Queue(maxsize=32)
+    stopped = threading.Event()
+    eof = object()
+
+    def enqueue(item):
+        while not stopped.is_set():
+            try:
+                lines.put(item, timeout=_PIPE_POLL_INTERVAL)
+                return
+            except queue.Full:
+                pass
+
+    def read_stdout():
+        try:
+            while not stopped.is_set():
+                line = proc.stdout.readline(_MAX_EVENT_CHARS + 1)
+                if not line:
+                    break
+                if len(line) > _MAX_EVENT_CHARS:
+                    enqueue(ChatGPTError("응답이 너무 길어 중단했습니다. 더 짧은 답변을 요청하세요."))
+                    break
+                enqueue(line)
+        except (OSError, ValueError):
+            enqueue(ChatGPTError("CLI 응답 연결이 중단되었습니다. 다시 시도하세요."))
+        finally:
+            proc.stdout.close()
+            enqueue(eof)
+
+    def drain_stderr():
+        try:
+            while not stopped.is_set() and proc.stderr.read(4096):
+                pass  # Diagnostics may contain private data; never retain/display them.
+        except (OSError, ValueError):
+            pass
+        finally:
+            proc.stderr.close()
+
+    def write_stdin():
+        try:
+            if prompt is not None:
+                proc.stdin.write(prompt)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                proc.stdin.close()
+            except (OSError, ValueError):
+                pass
+
+    def iterate():
+        while True:
+            _check_reply_deadline(cancel_event, deadline)
+            try:
+                item = lines.get(timeout=_PIPE_POLL_INTERVAL)
+            except queue.Empty:
+                continue
+            _check_reply_deadline(cancel_event, deadline)
+            if item is eof:
+                return
+            if isinstance(item, Exception):
+                raise item
+            yield item
+
+    workers = []
+    try:
+        for pipe, target in ((proc.stdout, read_stdout),
+                             (proc.stderr, drain_stderr),
+                             (proc.stdin, write_stdin)):
+            if pipe is not None:
+                worker = threading.Thread(target=target, daemon=True, name="local-cli-pipe")
+                worker.start()
+                workers.append(worker)
+        yield iterate()
+    finally:
+        stopped.set()
+        _terminate_process(proc)
+        # Bound cleanup even if an inherited pipe is held by a descendant.
+        join_deadline = time.monotonic() + 1
+        for worker in workers:
+            worker.join(timeout=max(0, join_deadline - time.monotonic()))
 
 
 def _validate_and_format_messages(
@@ -392,47 +514,38 @@ class GeminiCLIClient:
         parts: list[str] = []
         response_chars = 0
         completed_ok = False
-        deadline = time.monotonic() + 180
+        deadline = time.monotonic() + CLI_REPLY_TIMEOUT
         try:
-            if proc.stdin is not None:
-                try:
-                    proc.stdin.write(prompt)
-                    proc.stdin.close()
-                except OSError:
-                    pass
-            assert proc.stdout is not None
-            for raw_line in proc.stdout:
-                _check(cancel_event)
-                if time.monotonic() > deadline:
-                    raise ChatGPTError("응답 제한 시간을 넘겨 중단했습니다. 다시 시도하세요.")
-                line = raw_line.strip()
-                if not line or not line.startswith("{"):
-                    continue
-                try:
-                    event = json.loads(line)
-                    if not isinstance(event, dict):
+            with _cli_output(proc, prompt, cancel_event, deadline) as output:
+                for raw_line in output:
+                    line = raw_line.strip()
+                    if not line or not line.startswith("{"):
                         continue
-                except ValueError:
-                    continue
-                kind = event.get("type")
-                if kind == "message" and event.get("role") == "assistant":
-                    delta = event.get("content", "")
-                    if not isinstance(delta, str):
-                        raise ChatGPTError("응답 텍스트 형식이 올바르지 않습니다.")
-                    if delta:
-                        response_chars += len(delta)
-                        if response_chars > 20000:
-                            raise ChatGPTError("응답이 너무 길어 중단했습니다. 더 짧은 답변을 요청하세요.")
-                        parts.append(delta)
-                        on_delta(delta)
-                elif kind == "result":
-                    if event.get("status") == "success":
-                        completed_ok = True
-                        break
-                    raise ChatGPTError("Gemini CLI 응답이 실패했습니다. 로그인 상태나 사용량을 확인하세요.")
-                elif kind == "error":
-                    raise ChatGPTError("Gemini CLI 오류가 발생했습니다. 로그인 상태나 사용량을 확인하세요.")
-            proc.wait(timeout=5)
+                    try:
+                        event = json.loads(line)
+                        if not isinstance(event, dict):
+                            continue
+                    except ValueError:
+                        continue
+                    kind = event.get("type")
+                    if kind == "message" and event.get("role") == "assistant":
+                        delta = event.get("content", "")
+                        if not isinstance(delta, str):
+                            raise ChatGPTError("응답 텍스트 형식이 올바르지 않습니다.")
+                        if delta:
+                            response_chars += len(delta)
+                            if response_chars > 20000:
+                                raise ChatGPTError("응답이 너무 길어 중단했습니다. 더 짧은 답변을 요청하세요.")
+                            parts.append(delta)
+                            on_delta(delta)
+                    elif kind == "result":
+                        if event.get("status") == "success":
+                            completed_ok = True
+                            break
+                        raise ChatGPTError("Gemini CLI 응답이 실패했습니다. 로그인 상태나 사용량을 확인하세요.")
+                    elif kind == "error":
+                        raise ChatGPTError("Gemini CLI 오류가 발생했습니다. 로그인 상태나 사용량을 확인하세요.")
+                _wait_for_cli(proc, cancel_event, deadline)
         except Cancelled:
             _terminate_process(proc)
             raise
@@ -612,48 +725,45 @@ class AntigravityGeminiClient:
         parts: list[str] = []
         response_chars = 0
         completed_ok = False
-        deadline = time.monotonic() + 180
+        deadline = time.monotonic() + CLI_REPLY_TIMEOUT
         try:
-            assert proc.stdout is not None
-            for raw_line in proc.stdout:
-                _check(cancel_event)
-                if time.monotonic() > deadline:
-                    raise ChatGPTError("응답 제한 시간을 넘겨 중단했습니다. 다시 시도하세요.")
-                line = raw_line.strip()
-                if not line or not line.startswith("{"):
-                    continue
-                try:
-                    event = json.loads(line)
-                    if not isinstance(event, dict):
+            with _cli_output(proc, None, cancel_event, deadline) as output:
+                for raw_line in output:
+                    line = raw_line.strip()
+                    if not line or not line.startswith("{"):
                         continue
-                except ValueError:
-                    continue
-                kind = event.get("event")
-                if kind == "step_update":
-                    step = event.get("step_update")
-                    if isinstance(step, dict) and step.get("step_type") == "agent_response":
-                        delta = step.get("text_delta", "")
-                        if not isinstance(delta, str):
-                            raise ChatGPTError("응답 텍스트 형식이 올바르지 않습니다.")
-                        if delta:
-                            response_chars += len(delta)
-                            if response_chars > 20000:
-                                raise ChatGPTError("응답이 너무 길어 중단했습니다. 더 짧은 답변을 요청하세요.")
-                            parts.append(delta)
-                            on_delta(delta)
-                elif kind == "result":
-                    res = event.get("result")
-                    if isinstance(res, dict) and res.get("status") == "SUCCESS":
-                        fallback = res.get("response", "")
-                        if not parts and isinstance(fallback, str) and fallback:
-                            if len(fallback) > 20000:
-                                raise ChatGPTError("응답이 너무 길어 중단했습니다. 더 짧은 답변을 요청하세요.")
-                            parts.append(fallback)
-                            on_delta(fallback)
-                        completed_ok = True
-                        break
-                    raise ChatGPTError("Antigravity 응답이 완료되지 않았습니다. 로그인 상태나 사용량을 확인하세요.")
-            proc.wait(timeout=5)
+                    try:
+                        event = json.loads(line)
+                        if not isinstance(event, dict):
+                            continue
+                    except ValueError:
+                        continue
+                    kind = event.get("event")
+                    if kind == "step_update":
+                        step = event.get("step_update")
+                        if isinstance(step, dict) and step.get("step_type") == "agent_response":
+                            delta = step.get("text_delta", "")
+                            if not isinstance(delta, str):
+                                raise ChatGPTError("응답 텍스트 형식이 올바르지 않습니다.")
+                            if delta:
+                                response_chars += len(delta)
+                                if response_chars > 20000:
+                                    raise ChatGPTError("응답이 너무 길어 중단했습니다. 더 짧은 답변을 요청하세요.")
+                                parts.append(delta)
+                                on_delta(delta)
+                    elif kind == "result":
+                        res = event.get("result")
+                        if isinstance(res, dict) and res.get("status") == "SUCCESS":
+                            fallback = res.get("response", "")
+                            if not parts and isinstance(fallback, str) and fallback:
+                                if len(fallback) > 20000:
+                                    raise ChatGPTError("응답이 너무 길어 중단했습니다. 더 짧은 답변을 요청하세요.")
+                                parts.append(fallback)
+                                on_delta(fallback)
+                            completed_ok = True
+                            break
+                        raise ChatGPTError("Antigravity 응답이 완료되지 않았습니다. 로그인 상태나 사용량을 확인하세요.")
+                _wait_for_cli(proc, cancel_event, deadline)
         except Cancelled:
             _terminate_process(proc)
             raise
@@ -692,7 +802,7 @@ class MockLocalCLIClient:
         self.max_reply_chars: int | None = DEFAULT_MAX_REPLY_CHARS
 
     def session_info(self):
-        label = "Antigravity Gemini 데모" if self.provider == "antigravity_gemini" else "Gemini CLI 데모"
+        label = "Claude Code 데모" if self.provider == "claude" else "Antigravity Gemini 데모" if self.provider == "antigravity_gemini" else "Gemini CLI 데모"
         return {
             "connected": self.connected,
             "email": label if self.connected else "",
@@ -714,6 +824,8 @@ class MockLocalCLIClient:
         _check(cancel_event)
         if not self.connected:
             raise ChatGPTError("오프라인 데모에 먼저 연결하세요.")
+        if self.provider == "claude":
+            return [{"slug": "auto", "display_name": "Claude 자동 [오프라인 데모]"}]
         if self.provider == "antigravity_gemini":
             return [
                 {"slug": "gemini-4-argon-high", "display_name": "Gemini 4 Argon (High) [오프라인 데모]"},
@@ -730,8 +842,10 @@ class MockLocalCLIClient:
             raise ChatGPTError(REASONING_REJECTED)
         if self.provider == "antigravity_gemini" and reasoning_effort is not None and reasoning_effort not in ANTIGRAVITY_EFFORTS:
             raise ChatGPTError(REASONING_REJECTED)
+        if self.provider == "claude" and reasoning_effort is not None and reasoning_effort not in ("low", "medium", "high", "xhigh", "max"):
+            raise ChatGPTError(REASONING_REJECTED)
         self.list_models(cancel_event)
-        tag = "Antigravity Gemini" if self.provider == "antigravity_gemini" else "Gemini CLI"
+        tag = "Claude Code" if self.provider == "claude" else "Antigravity Gemini" if self.provider == "antigravity_gemini" else "Gemini CLI"
         text = f"[오프라인 데모 · {tag}] 안녕하세요! 후부키 {tag} 연결 화면이 정상 작동하고 있어요."
         for start in range(0, len(text), 3):
             _check(cancel_event)
@@ -742,3 +856,4 @@ class MockLocalCLIClient:
     def logout(self):
         self.connected = False
         return {"revoked": True, "message": "데모 연결을 해제했습니다."}
+

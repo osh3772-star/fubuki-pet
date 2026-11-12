@@ -274,7 +274,7 @@ class MultiProviderUITests(unittest.TestCase):
 
     def test_switch_between_chatgpt_gemini_and_antigravity(self):
         self.assertEqual(self.window.current_provider, "chatgpt")
-        self.assertEqual(self.window.provider_selector.count(), 3)
+        self.assertEqual(self.window.provider_selector.count(), 4)
 
         # Switch to Gemini CLI via bubble selector
         self.window.bubble_provider.setCurrentIndex(1)
@@ -304,6 +304,21 @@ class MultiProviderUITests(unittest.TestCase):
             self.window.send()
             self.wait()
         self.assertIn("Antigravity Gemini", self.window.transcript.toPlainText())
+
+    def test_claude_provider_selector_and_chat(self):
+        self.window.select_provider("claude")
+        self.assertEqual(self.window.bubble_provider.currentData(), "claude")
+        self.assertEqual(self.window.provider_selector.currentData(), "claude")
+        self.assertTrue(self.window.cli_login_button.isVisibleTo(self.window))
+        with patch("windows_pet.local_cli_clients.time.sleep"):
+            self.window.connect_account()
+            self.wait()
+            self.window.input.setPlainText("클로드 안녕")
+            self.window.send()
+            self.wait()
+        self.assertIn("Claude", self.window.transcript.toPlainText())
+        self.window.select_provider("chatgpt")
+        self.assertEqual(self.window.current_provider, "chatgpt")
 
     def test_multilingual_persona_and_prompt_support_ko_ja_en(self):
         self.assertIn("한국어", PERSONA)
@@ -529,3 +544,4 @@ class MultiProviderUITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

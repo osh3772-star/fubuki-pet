@@ -285,8 +285,8 @@ class BubbleChat(ChatWindow):
         self.bubble_provider=ProviderComboBox()
         self.bubble_provider.setObjectName('bubbleProvider')
         self.bubble_provider.setAccessibleName('Bubble provider selector')
-        self.bubble_provider.setToolTip('대화 공급자 선택 (ChatGPT · Gemini · Antigravity Gemini)')
-        for label,code in (('ChatGPT','chatgpt'),('Gemini','gemini'),('Antigravity','antigravity_gemini')):
+        self.bubble_provider.setToolTip('대화 공급자 선택 (ChatGPT · Gemini · Antigravity Gemini · Claude)')
+        for label,code in (('ChatGPT','chatgpt'),('Gemini','gemini'),('Antigravity','antigravity_gemini'),('Claude','claude')):
             self.bubble_provider.addItem(label,code)
         self.bubble_provider.setFixedSize(94,26)
         self.bubble_provider.view().setMinimumWidth(150)
@@ -630,7 +630,7 @@ class PetContextBubble(SnowBubble):
         prov_row = QHBoxLayout()
         prov_row.setSpacing(4)
         self.provider_buttons = {}
-        for label, code in (('ChatGPT', 'chatgpt'), ('Gemini', 'gemini'), ('Antigravity', 'antigravity_gemini')):
+        for label, code in (('ChatGPT', 'chatgpt'), ('Gemini', 'gemini'), ('Antigravity', 'antigravity_gemini'), ('Claude', 'claude')):
             btn = QPushButton(label)
             btn.clicked.connect(lambda checked=False, c=code: (self.hide(), self.overlay.open_chat_provider(c)))
             prov_row.addWidget(btn, 1)
@@ -807,3 +807,4 @@ class PetContextBubble(SnowBubble):
     def mouseReleaseEvent(self, event):
         self._drag_offset = None
         super().mouseReleaseEvent(event)
+

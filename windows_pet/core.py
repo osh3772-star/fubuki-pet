@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import math
+import random
 from typing import Iterable
 
 JOB_STATES=frozenset({'working','thinking','waiting','success','failed','review','idle'})
@@ -14,6 +15,7 @@ DRAG_STATES=frozenset({'grab_start','grabbed_idle','drag_left','drag_right','dra
 PHYSICS_STATES=frozenset({'release','fall','landing','land','recover'})
 REACTIONS=frozenset({'hover','click','double_click','pat','wave','return_greet'})
 AMBIENT=frozenset({'idle','blink','look','look_away','walk_left','walk_right','run_left','run_right','jump','turn','sit','sleep','wake','stretch','yawn','ear_twitch','tail_wag','head_tilt','look_around','idle_sit'})
+RUN_STATES=frozenset({'run_left','run_right'})
 STATES=JOB_STATES|DRAG_STATES|PHYSICS_STATES|REACTIONS|AMBIENT
 
 @dataclass(frozen=True)
@@ -42,11 +44,15 @@ class Settings:
     scale:float=1.0
     always_on_top:bool=True
     event_inbox_enabled:bool=False
+    dash_enabled:bool=True
+    dash_chance:float=0.20
+    dash_interval:float=10.0
+    dash_speed:float=420.0
     def __post_init__(self):
-        for name in ('always_on_top','event_inbox_enabled'):
+        for name in ('always_on_top','event_inbox_enabled','dash_enabled'):
             if type(getattr(self,name)) is not bool:
                 raise ValueError(f'Invalid boolean setting {name}')
-        limits={'gravity':(0,10000),'terminal_velocity':(10,10000),'restitution':(0,0.85),'friction':(0,40),'drag_inertia':(0,1.5),'drag_threshold':(2,50),'max_throw_speed':(0,5000),'double_click_seconds':(0.1,0.8),'sit_after':(10,86400),'sleep_after':(20,86400),'scale':(0.5,2.5)}
+        limits={'dash_chance':(0,1),'dash_interval':(1,3600),'dash_speed':(1,2000),'gravity':(0,10000),'terminal_velocity':(10,10000),'restitution':(0,0.85),'friction':(0,40),'drag_inertia':(0,1.5),'drag_threshold':(2,50),'max_throw_speed':(0,5000),'double_click_seconds':(0.1,0.8),'sit_after':(10,86400),'sleep_after':(20,86400),'scale':(0.5,2.5)}
         for name,(lo,hi) in limits.items():
             value=getattr(self,name)
             if isinstance(value,bool) or not isinstance(value,(float,int)) or not math.isfinite(value) or not lo<=value<=hi:raise ValueError(f'Invalid setting {name}: {value!r}')
@@ -64,7 +70,7 @@ class PetEngine:
     Queue sizes and history are bounded. tick() uses a caller-supplied monotonic
     time; tests can advance time without sleeping.
     """
-    def __init__(self,screens:Iterable[Rect],settings:Settings|None=None,now:float=0.0):
+    def __init__(self,screens:Iterable[Rect],settings:Settings|None=None,now:float=0.0,*,rng=None):
         self.settings=settings or Settings()
         self.screens=list(screens)
         if not self.screens:raise ValueError('At least one available screen is required')
@@ -87,6 +93,9 @@ class PetEngine:
         self.pat_samples=deque(maxlen=60);self.pat_cooldown_until=0.0
         self.source_label='none';self.reduced_motion=False
         self.animation_durations_ms:dict[str,float]={}
+        self.rng=rng if rng is not None else random.Random()
+        self.next_dash_at=now+self.settings.dash_interval
+        self.chat_status_until=None
 
     def configure_clip_timings(self, clips:dict)->None:
         """Use real non-looping clip lengths instead of prototype timeouts.
@@ -122,7 +131,10 @@ class PetEngine:
         changed=state!=self.state
         if changed:
             self.history.append({'at':round(self.now,4),'from':self.state,'to':state,'reason':reason})
-            self.state=state;self.state_since=self.now
+            self.state=state
+        # Explicit action replay restarts its clip, even when the name matches.
+        # Ordinary _resume() calls have no duration and must not restart loops.
+        if changed or duration is not None:self.state_since=self.now
         if changed or duration is not None:self.until=self.now+duration if duration is not None else None
 
     def _nearest_screen(self,px:float,py:float)->Rect:
@@ -167,6 +179,9 @@ class PetEngine:
 
     def pointer_down(self,x:float,y:float,opaque:bool)->bool:
         if not opaque:return False
+        if self.state in RUN_STATES:
+            self._resume()
+            self.next_dash_at=self.now+self.settings.dash_interval
         self.pressed=True;self.dragging=False;self.press_at=(x,y)
         self.pat_samples.clear();self.last_pointer_over_head=False
         self.grab_offset=(x-self.x,y-self.y);self.last_activity=self.now
@@ -287,6 +302,18 @@ class PetEngine:
         if not self.dragging and self.priority(self.state)<=40:self._resume()
         return True
 
+    def chat_event(self,state:str)->None:
+        """Local chat has one transient status, independent of selected provider.
+
+        External task inbox statuses keep their existing explicit-idle semantics.
+        Only the pet chat's completed/failed reaction expires automatically.
+        """
+        if state not in {'thinking','success','failed','idle'}:
+            raise ValueError('Invalid chat state')
+        self.chat_status_until=self.now+2.5 if state in {'success','failed'} else None
+        self.last_activity=self.now
+        self.job_event(state,'local_app','pet_chat')
+
     def _job_choice(self)->Job|None:
         if not self.jobs:return None
         rank={'waiting':6,'failed':5,'success':4,'review':3,'working':2,'thinking':1}
@@ -306,10 +333,40 @@ class PetEngine:
 
     def debug_action(self,state:str)->bool:
         if state not in STATES:raise ValueError(f'Unknown state: {state}')
-        if state in JOB_STATES:self.job_event(state);return True
+        if state in JOB_STATES:self.job_event(state,'manual','debug');return True
         if state in DRAG_STATES or state in PHYSICS_STATES:return False
         if self.priority(self.state)>=80:return False
         self._set(state,1.0,'manual debug action');return True
+
+    def _dash_allowed(self)->bool:
+        floor=max(self.screen.y,self.screen.bottom-self.pivot_y)
+        return (self.settings.dash_enabled and not self.reduced_motion
+                and not self.pressed and not self.dragging and not self.jobs
+                and self.click_due is None and abs(self.y-floor)<1.0)
+
+    def _maybe_dash(self)->None:
+        if self.now<self.next_dash_at:return
+        # One trial per interval; a timer stall never causes a burst of rolls.
+        self.next_dash_at=self.now+self.settings.dash_interval
+        if self.state!='idle' or not self._dash_allowed():return
+        if self.rng.random()>=self.settings.dash_chance:return
+        left=self.screen.x;right=max(left,self.screen.right-self.width)
+        directions=[]
+        if self.x>left+1:directions.append('run_left')
+        if self.x<right-1:directions.append('run_right')
+        if not directions:return
+        self._set(self.rng.choice(directions),self.rng.uniform(.8,1.6),'random dash')
+
+    def _dash(self,dt:float)->None:
+        if not self._dash_allowed():
+            self._resume();return
+        left=self.screen.x;right=max(left,self.screen.right-self.width)
+        sign=-1 if self.state=='run_left' else 1
+        # Stay on the current real work area, including negative-coordinate
+        # monitors. Never cross a virtual-desktop gap or teleport to a monitor.
+        self.x=min(right,max(left,self.x+sign*self.settings.dash_speed*self.settings.scale*dt))
+        if (sign<0 and self.x<=left) or (sign>0 and self.x>=right):
+            self._resume()
 
     def _physics(self,dt:float)->None:
         # Small substeps avoid overshoot. Timer stalls discard excess elapsed time.
@@ -339,6 +396,9 @@ class PetEngine:
         if self.click_due is not None and now>=self.click_due:
             self.click_due=None
             if not self.pressed and not self.dragging and self.priority(self.state)<80:self._set('click',.45,'single click confirmed')
+        if self.chat_status_until is not None and now>=self.chat_status_until:
+            self.chat_status_until=None
+            self.job_event('idle','local_app','pet_chat')
         # Success is an explicitly supplied event, never inferred from a stopped turn.
         for job in self.jobs.values():
             if job.state=='success' and now-job.received_at>2.5:job.state='review'
@@ -355,7 +415,10 @@ class PetEngine:
             elif old=='recover':self._resume()
             elif old not in PHYSICS_STATES:self._resume()
         if self.state=='fall':self._physics(dt)
+        elif self.state in RUN_STATES:self._dash(dt)
         elif self.priority(self.state)<=40 and self.until is None:self._resume()
+        self._maybe_dash()
 
     def snapshot(self)->dict:
         return {'state':self.state,'x':self.x,'y':self.y,'vx':self.vx,'vy':self.vy,'pressed':self.pressed,'dragging':self.dragging,'source':self.source_label,'pending_jobs':len(self.jobs),'gaze_angle':self.gaze_angle}
+

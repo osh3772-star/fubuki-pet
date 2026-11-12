@@ -118,10 +118,11 @@ def main()->int:
             title=self.menu.addAction('Fubuki Pet');title.setEnabled(False)
             self.status_action=self.menu.addAction('');self.status_action.setEnabled(False)
             self.menu.addSeparator();self.menu.addAction('ChatGPT 구독 채팅',self.open_chat)
-            providers_menu=self.menu.addMenu('대화 공급자 선택 (ChatGPT · Gemini · Antigravity)')
+            providers_menu=self.menu.addMenu('대화 공급자 선택 (ChatGPT · Gemini · Antigravity · Claude)')
             providers_menu.addAction('ChatGPT 구독',lambda:self.open_chat_provider('chatgpt'))
             providers_menu.addAction('Gemini (로컬 Gemini CLI)',lambda:self.open_chat_provider('gemini'))
             providers_menu.addAction('Antigravity Gemini (로컬 Antigravity)',lambda:self.open_chat_provider('antigravity_gemini'))
+            providers_menu.addAction('Claude (로컬 Claude Code)',lambda:self.open_chat_provider('claude'))
             providers_menu.addSeparator()
             providers_menu.addAction('계정 · 모델 설정 열기',self.open_chat_settings)
             self.menu.addAction('동작 패널 / 상태 보기',self.open_debug)
@@ -238,7 +239,7 @@ def main()->int:
                 self.setToolTip(f'Fubuki Pet\nState: {engine.state}\nArt: {self.displayed}\nSource: {engine.source_label}')
                 self.status_action.setText(f'{engine.state} | '+('그림 없음' if self.missing_art else '재생 중'))
             if self.debug is not None and self.debug.isVisible():self.debug.refresh()
-            active=engine.dragging or engine.state in {'release','fall','landing','recover'}
+            active=engine.dragging or engine.state in {'release','fall','landing','recover','run_left','run_right'}
             interval=round(1000/(settings.active_fps if active else settings.idle_fps))
             if self.timer.interval()!=interval:self.timer.setInterval(interval)
             if now-self.last_save>5 and not engine.dragging:self.save();self.last_save=now
@@ -285,7 +286,7 @@ def main()->int:
             from .chat_bubble import BubbleChat as ChatWindow
             if self.chat is None:
                 self.chat=ChatWindow(store/'chatgpt',mock=args.chat_mock,anchor=self)
-                self.chat.state_changed.connect(lambda state:engine.job_event(state,'local_app',getattr(self.chat,'current_provider','chatgpt')))
+                self.chat.state_changed.connect(engine.chat_event)
             return self.chat
         def open_chat(self):
             self._ensure_chat().open_bubble()
@@ -373,3 +374,4 @@ def main()->int:
     return app.exec()
 
 if __name__=='__main__':raise SystemExit(main())
+
